@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { PortalLayout } from '../../components/PortalLayout';
 import { CardDesignPreviewModal } from '../../components/CardDesignPreviewModal';
+import { RichBioEditor } from '../../components/RichBioEditor';
+import { ScreenProtectionShield } from '../../components/ScreenProtectionShield';
 import {
   ProfilePhotoEditorModal,
   autoFitImageToSquareDataUrl,
@@ -36,11 +38,13 @@ import {
   getUserProfiles,
   isOrderPaymentConfirmed,
   isSlugAvailable,
+  markProfilePaymentCompleted,
   maskEmail,
   maskPhone,
   sanitizeSlug,
   saveProfileAndSyncPublic,
 } from '../../lib/firestoreService';
+import { sanitizeRichBioHtml } from '../../lib/richText';
 import { getActiveStudioDraft, resolveEffectiveCardDesign } from '../../lib/studioDraft';
 import { INDIAN_STATES, SOCIAL_PLATFORMS } from '../../lib/constants';
 import type {
@@ -104,6 +108,8 @@ const WatermarkedProfileModal: React.FC<{
     return explicitVis !== undefined ? Boolean(explicitVis) : Boolean(s.enabled);
   });
   const visibleCustom = (profile.customFields || []).filter((cf) => cf.visible);
+  const showWhatsappInConnect = Boolean(v.whatsapp && info.whatsapp);
+  const cleanWaDigits = (info.whatsapp || '').replace(/[^0-9]/g, '');
 
   return (
     <div
@@ -111,219 +117,405 @@ const WatermarkedProfileModal: React.FC<{
       role="dialog"
       aria-modal="true"
     >
-      <div
-        className={`relative w-full max-w-md max-h-[90vh] overflow-y-auto bg-white rounded-3xl border border-slate-200 shadow-2xl ${
-          !isPaid ? 'select-none' : ''
-        }`}
-      >
-        {/* Diagonal Watermark Overlay ONLY when Payment is Pending */}
-        {!isPaid && (
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-around overflow-hidden opacity-20"
-          >
-            {[0, 1, 2, 3].map((row) => (
-              <div
-                key={row}
-                className="-rotate-24 font-display text-lg sm:text-xl font-extrabold tracking-widest text-slate-700 whitespace-nowrap"
-              >
-                TAPNEX PREVIEW · PAYMENT PENDING
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="sticky top-0 z-30 bg-[#050814] text-white px-5 py-4 flex items-center justify-between">
-          {isPaid ? (
-            <div className="flex items-center gap-2 text-xs font-semibold text-emerald-300">
-              <Check className="h-3.5 w-3.5" />
-              <span>Live Profile Preview · Active &amp; Unlocked</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 text-xs font-semibold text-amber-300">
-              <Lock className="h-3.5 w-3.5" />
-              <span>Watermarked Preview (Unpaid)</span>
+      <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto bg-white rounded-3xl border border-slate-200 shadow-2xl">
+        <ScreenProtectionShield
+          active
+          watermarkLabel={
+            isPaid ? `TAPNEX PROTECTED · /p/${profile.slug}` : 'TAPNEX PREVIEW · PAYMENT PENDING'
+          }
+        >
+          {/* Diagonal Watermark Overlay when Payment is Pending */}
+          {!isPaid && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-around overflow-hidden opacity-20"
+            >
+              {[0, 1, 2, 3].map((row) => (
+                <div
+                  key={row}
+                  className="-rotate-24 font-display text-lg sm:text-xl font-extrabold tracking-widest text-slate-700 whitespace-nowrap"
+                >
+                  TAPNEX PREVIEW · PAYMENT PENDING
+                </div>
+              ))}
             </div>
           )}
-          <div className="flex items-center gap-2">
-            {isPaid && profile.isPublic && (
-              <a
-                href={`/p/${profile.slug}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-[11px] font-medium text-white"
-              >
-                <span>Open Live</span>
-                <ExternalLink className="h-3 w-3" />
-              </a>
+
+          <div className="sticky top-0 z-40 bg-[#050814] text-white px-5 py-4 flex items-center justify-between">
+            {isPaid && !profile.adminDisabled ? (
+              <div className="flex items-center gap-2 text-xs font-semibold text-emerald-300">
+                <Check className="h-3.5 w-3.5" />
+                <span>Live Profile Preview · Active &amp; Unlocked</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-xs font-semibold text-amber-300">
+                <Lock className="h-3.5 w-3.5" />
+                <span>{profile.adminDisabled ? 'Disabled by Admin' : 'Watermarked Preview (Unpaid)'}</span>
+              </div>
             )}
+            <div className="flex items-center gap-2">
+              {isPaid && profile.isPublic && !profile.adminDisabled && (
+                <a
+                  href={`/p/${profile.slug}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-[11px] font-medium text-white"
+                >
+                  <span>Open Live</span>
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={onClose}
+                className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white"
+                aria-label="Close preview"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="relative z-10 p-6 space-y-5">
+            {!isPaid && (
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900">
+                Phone number, email ID, direct actions, and live share URL remain masked/locked until card payment is confirmed or approved by an admin.
+              </div>
+            )}
+
+            <div className="flex flex-col items-center text-center">
+              {v.photo && info.photoDataUrl ? (
+                <img
+                  src={info.photoDataUrl}
+                  alt={info.fullName || 'Preview'}
+                  className="w-20 h-20 rounded-full object-cover border-2 border-slate-200 bg-transparent"
+                />
+              ) : (
+                <div className="w-20 h-20 rounded-full bg-[#1D4ED8] text-white flex items-center justify-center font-display text-xl font-bold">
+                  {(info.fullName || 'T')[0].toUpperCase()}
+                </div>
+              )}
+              {v.fullName && (
+                <h3 className="mt-3 font-display text-xl font-bold text-[#0B1D3A]">
+                  {info.fullName || 'Your Full Name'}
+                </h3>
+              )}
+              {(v.jobTitle || v.companyName) && (
+                <p className="text-xs text-slate-600 mt-1">
+                  {[v.jobTitle ? info.jobTitle : '', v.companyName ? info.companyName : ''].filter(Boolean).join(' · ')}
+                </p>
+              )}
+              {v.businessCategory && info.businessCategory && (
+                <p className="mt-0.5 text-[11px] text-slate-500">{info.businessCategory}</p>
+              )}
+              {v.shortBio && info.shortBio && (
+                <div
+                  className="mt-2.5 w-full text-xs text-slate-600 leading-relaxed [&_p]:my-1"
+                  dangerouslySetInnerHTML={{ __html: sanitizeRichBioHtml(info.shortBio) }}
+                />
+              )}
+            </div>
+
+            <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl text-xs">
+              {v.mobile && info.mobile && (
+                <div className="px-4 py-3 flex justify-between gap-3">
+                  <span className="text-slate-500">{isPaid ? 'Mobile' : 'Mobile (Masked)'}</span>
+                  <span className="font-mono font-semibold text-slate-700 text-right">
+                    {isPaid ? info.mobile : maskPhone(info.mobile)}
+                  </span>
+                </div>
+              )}
+              {v.alternateMobile && info.alternateMobile && (
+                <div className="px-4 py-3 flex justify-between gap-3">
+                  <span className="text-slate-500">{isPaid ? 'Alternate Mobile' : 'Alternate Mobile (Masked)'}</span>
+                  <span className="font-mono font-semibold text-slate-700 text-right">
+                    {isPaid ? info.alternateMobile : maskPhone(info.alternateMobile)}
+                  </span>
+                </div>
+              )}
+              {v.email && info.email && (
+                <div className="px-4 py-3 flex justify-between gap-3">
+                  <span className="text-slate-500">{isPaid ? 'Email' : 'Email (Masked)'}</span>
+                  <span className="font-mono font-semibold text-slate-700 truncate text-right">
+                    {isPaid ? info.email : maskEmail(info.email)}
+                  </span>
+                </div>
+              )}
+              {v.alternateEmail && info.alternateEmail && (
+                <div className="px-4 py-3 flex justify-between gap-3">
+                  <span className="text-slate-500">{isPaid ? 'Alternate Email' : 'Alternate Email (Masked)'}</span>
+                  <span className="font-mono font-semibold text-slate-700 truncate text-right">
+                    {isPaid ? info.alternateEmail : maskEmail(info.alternateEmail)}
+                  </span>
+                </div>
+              )}
+              {v.website && info.website && (
+                <div className="px-4 py-3 flex justify-between gap-3">
+                  <span className="text-slate-500">{isPaid ? 'Website' : 'Website (Masked)'}</span>
+                  <span className="font-semibold text-slate-700 truncate text-right">
+                    {isPaid ? info.website : '•••••.••'}
+                  </span>
+                </div>
+              )}
+              {v.businessAddress && addressParts.length > 0 && (
+                <div className="px-4 py-3 flex justify-between gap-3">
+                  <span className="text-slate-500 shrink-0">Business Address</span>
+                  <span className="text-slate-600 text-right">
+                    {isPaid ? addressParts.join(', ') : `${info.city || 'India'} (Address masked)`}
+                  </span>
+                </div>
+              )}
+              {v.personalAddress && info.personalAddress && (
+                <div className="px-4 py-3 flex justify-between gap-3">
+                  <span className="text-slate-500 shrink-0">Personal Address</span>
+                  <span className="text-slate-600 text-right">
+                    {isPaid ? info.personalAddress : 'Personal address masked'}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {(visibleSocials.length > 0 || showWhatsappInConnect) && (
+              <div>
+                <div className="text-[11px] font-semibold text-slate-500 mb-2">Connect Online</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {showWhatsappInConnect &&
+                    (isPaid && cleanWaDigits ? (
+                      <a
+                        href={`https://wa.me/${cleanWaDigits}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-between px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-xs font-semibold text-emerald-900 hover:bg-emerald-100"
+                      >
+                        <span className="truncate">WhatsApp</span>
+                        <ExternalLink className="h-3 w-3 text-emerald-700 shrink-0 ml-1" />
+                      </a>
+                    ) : (
+                      <div className="flex items-center justify-between px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-medium text-slate-500">
+                        <span className="truncate">WhatsApp</span>
+                        <Lock className="h-3 w-3 text-slate-400 shrink-0 ml-1" />
+                      </div>
+                    ))}
+                  {visibleSocials.map((s) =>
+                    isPaid ? (
+                      <a
+                        key={s.id}
+                        href={s.url.startsWith('http') ? s.url : `https://${s.url}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-between px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-medium text-slate-800 hover:bg-slate-100"
+                      >
+                        <span className="truncate">{s.label || s.platform}</span>
+                        <ExternalLink className="h-3 w-3 text-slate-400 shrink-0 ml-1" />
+                      </a>
+                    ) : (
+                      <div
+                        key={s.id}
+                        className="flex items-center justify-between px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-medium text-slate-500"
+                      >
+                        <span className="truncate">{s.label || s.platform}</span>
+                        <Lock className="h-3 w-3 text-slate-400 shrink-0 ml-1" />
+                      </div>
+                    )
+                  )}
+                </div>
+              </div>
+            )}
+
+            {visibleCustom.length > 0 && (
+              <div>
+                <div className="text-[11px] font-semibold text-slate-500 mb-2">Additional Details</div>
+                <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl text-xs">
+                  {visibleCustom.map((cf) => (
+                    <div key={cf.id} className="px-4 py-2.5 flex justify-between gap-3">
+                      <span className="text-slate-500">{cf.label}</span>
+                      <span className="font-medium text-slate-800 text-right">
+                        {isPaid ? cf.value : '••••••'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <hr className="border-t border-slate-200" />
+            <div className="text-center text-xs text-slate-500">
+              Get your portfolio at: <span className="font-semibold text-[#0B1D3A]">tapnex.in</span>
+            </div>
+          </div>
+        </ScreenProtectionShield>
+      </div>
+    </div>
+  );
+};
+
+const CreateDigitalProfileModal: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  profilesCount: number;
+  onCreated: (created: ProfileRecord) => Promise<void> | void;
+}> = ({ open, onClose, profilesCount, onCreated }) => {
+  const { userRecord } = useAuth();
+  const { notify } = useToast();
+  const [newLabel, setNewLabel] = useState('');
+  const [newSlug, setNewSlug] = useState('');
+  const [modalSlugStatus, setModalSlugStatus] = useState<'idle' | 'available' | 'taken'>('idle');
+  const [creatingProfile, setCreatingProfile] = useState(false);
+
+  if (!open) return null;
+
+  const handleCheckModalSlug = async () => {
+    const clean = sanitizeSlug(newSlug);
+    setNewSlug(clean);
+    if (clean.length < 3) {
+      setModalSlugStatus('taken');
+      return;
+    }
+    const ok = await isSlugAvailable(clean);
+    setModalSlugStatus(ok ? 'available' : 'taken');
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userRecord) return;
+    const labelToUse = newLabel.trim() || `Profile ${profilesCount + 1}`;
+    const rawSlug = newSlug.trim() || labelToUse;
+    const cleanSlug = sanitizeSlug(rawSlug);
+    if (cleanSlug.length < 3) {
+      notify('Custom slug too short', 'Please enter at least 3 letters/numbers for your custom profile URL slug.', 'error');
+      return;
+    }
+    setCreatingProfile(true);
+    try {
+      const available = await isSlugAvailable(cleanSlug);
+      if (!available) {
+        setModalSlugStatus('taken');
+        notify('Slug already taken', 'Please pick a different custom slug for this digital profile.', 'error');
+        setCreatingProfile(false);
+        return;
+      }
+      const created = await createAdditionalProfile(
+        userRecord.uid,
+        labelToUse,
+        cleanSlug,
+        { fullName: userRecord.displayName || '', email: userRecord.email || '' }
+      );
+      localStorage.setItem(`tapnex_active_profile_${userRecord.uid}`, created.profileId);
+      setNewLabel('');
+      setNewSlug('');
+      setModalSlugStatus('idle');
+      onClose();
+      await onCreated(created);
+    } catch (err) {
+      notify('Unable to create profile', err instanceof Error ? err.message : 'Try a different slug.', 'error');
+    } finally {
+      setCreatingProfile(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <form
+        onSubmit={handleSubmit}
+        className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden"
+      >
+        <div className="px-6 py-4 bg-[#0B1D3A] text-white flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Plus className="h-4 w-4 text-cyan-300" />
+            <h3 className="font-display font-bold text-base">Create New Digital Profile</h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white"
+            aria-label="Close modal"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <p className="text-xs text-slate-600 leading-relaxed">
+            Choose a label and custom URL slug for your new digital card profile. We will open <strong>My Profile</strong> so you can fill in your details right away.
+          </p>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Profile Label *</label>
+            <input
+              type="text"
+              required
+              value={newLabel}
+              onChange={(e) => {
+                const val = e.target.value;
+                setNewLabel(val);
+                if (!newSlug || newSlug === sanitizeSlug(newLabel)) {
+                  setNewSlug(sanitizeSlug(val));
+                  setModalSlugStatus('idle');
+                }
+              }}
+              placeholder="e.g. Consulting, Real Estate, Personal"
+              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Custom Public URL Slug *</label>
+            <div className="flex gap-2">
+              <div className="flex flex-1 items-center border border-slate-300 rounded-lg overflow-hidden bg-slate-50">
+                <span className="px-2.5 text-xs font-mono text-slate-500 border-r border-slate-200 py-2.5">
+                  /p/
+                </span>
+                <input
+                  type="text"
+                  required
+                  value={newSlug}
+                  onChange={(e) => {
+                    setNewSlug(e.target.value.toLowerCase());
+                    setModalSlugStatus('idle');
+                  }}
+                  placeholder="jeet-consulting"
+                  className="flex-1 px-3 py-2 bg-white text-sm font-mono focus:outline-none"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleCheckModalSlug}
+                className="px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap"
+              >
+                Check
+              </button>
+            </div>
+            {modalSlugStatus === 'available' && (
+              <p className="mt-1 text-xs text-emerald-700 font-medium">Slug is available!</p>
+            )}
+            {modalSlugStatus === 'taken' && (
+              <p className="mt-1 text-xs text-rose-700 font-medium">Slug unavailable or shorter than 3 characters.</p>
+            )}
+          </div>
+
+          <div className="pt-2 flex items-center justify-end gap-2.5">
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white"
-              aria-label="Close preview"
+              className="px-4 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50"
             >
-              <X className="h-4 w-4" />
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={creatingProfile}
+              className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-[#1D4ED8] hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-50"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>{creatingProfile ? 'Creating Profile...' : 'Create & Fill Profile Info'}</span>
             </button>
           </div>
         </div>
-
-        <div className="relative z-10 p-6 space-y-5">
-          {!isPaid && (
-            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900">
-              Phone number, email ID, direct actions, and live share URL remain masked/locked until card payment is confirmed or approved by an admin.
-            </div>
-          )}
-
-          <div className="flex flex-col items-center text-center">
-            {v.photo && info.photoDataUrl ? (
-              <img
-                src={info.photoDataUrl}
-                alt={info.fullName || 'Preview'}
-                className="w-20 h-20 rounded-full object-cover border-2 border-slate-200"
-              />
-            ) : (
-              <div className="w-20 h-20 rounded-full bg-[#1D4ED8] text-white flex items-center justify-center font-display text-xl font-bold">
-                {(info.fullName || 'T')[0].toUpperCase()}
-              </div>
-            )}
-            {v.fullName && (
-              <h3 className="mt-3 font-display text-xl font-bold text-[#0B1D3A]">
-                {info.fullName || 'Your Full Name'}
-              </h3>
-            )}
-            {(v.jobTitle || v.companyName) && (
-              <p className="text-xs text-slate-600 mt-1">
-                {[v.jobTitle ? info.jobTitle : '', v.companyName ? info.companyName : ''].filter(Boolean).join(' · ')}
-              </p>
-            )}
-            {v.businessCategory && info.businessCategory && (
-              <p className="mt-0.5 text-[11px] text-slate-500">{info.businessCategory}</p>
-            )}
-            {v.shortBio && info.shortBio && (
-              <p className="mt-2.5 text-xs text-slate-600 leading-relaxed">{info.shortBio}</p>
-            )}
-          </div>
-
-          <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl text-xs">
-            {v.mobile && info.mobile && (
-              <div className="px-4 py-3 flex justify-between gap-3">
-                <span className="text-slate-500">{isPaid ? 'Mobile' : 'Mobile (Masked)'}</span>
-                <span className="font-mono font-semibold text-slate-700 text-right">
-                  {isPaid ? info.mobile : maskPhone(info.mobile)}
-                </span>
-              </div>
-            )}
-            {v.alternateMobile && info.alternateMobile && (
-              <div className="px-4 py-3 flex justify-between gap-3">
-                <span className="text-slate-500">{isPaid ? 'Alternate Mobile' : 'Alternate Mobile (Masked)'}</span>
-                <span className="font-mono font-semibold text-slate-700 text-right">
-                  {isPaid ? info.alternateMobile : maskPhone(info.alternateMobile)}
-                </span>
-              </div>
-            )}
-            {v.whatsapp && info.whatsapp && (
-              <div className="px-4 py-3 flex justify-between gap-3">
-                <span className="text-slate-500">{isPaid ? 'WhatsApp' : 'WhatsApp (Masked)'}</span>
-                <span className="font-mono font-semibold text-slate-700 text-right">
-                  {isPaid ? info.whatsapp : maskPhone(info.whatsapp)}
-                </span>
-              </div>
-            )}
-            {v.email && info.email && (
-              <div className="px-4 py-3 flex justify-between gap-3">
-                <span className="text-slate-500">{isPaid ? 'Email' : 'Email (Masked)'}</span>
-                <span className="font-mono font-semibold text-slate-700 truncate text-right">
-                  {isPaid ? info.email : maskEmail(info.email)}
-                </span>
-              </div>
-            )}
-            {v.alternateEmail && info.alternateEmail && (
-              <div className="px-4 py-3 flex justify-between gap-3">
-                <span className="text-slate-500">{isPaid ? 'Alternate Email' : 'Alternate Email (Masked)'}</span>
-                <span className="font-mono font-semibold text-slate-700 truncate text-right">
-                  {isPaid ? info.alternateEmail : maskEmail(info.alternateEmail)}
-                </span>
-              </div>
-            )}
-            {v.website && info.website && (
-              <div className="px-4 py-3 flex justify-between gap-3">
-                <span className="text-slate-500">{isPaid ? 'Website' : 'Website (Masked)'}</span>
-                <span className="font-semibold text-slate-700 truncate text-right">
-                  {isPaid ? info.website : '•••••.••'}
-                </span>
-              </div>
-            )}
-            {v.businessAddress && addressParts.length > 0 && (
-              <div className="px-4 py-3 flex justify-between gap-3">
-                <span className="text-slate-500 shrink-0">Business Address</span>
-                <span className="text-slate-600 text-right">
-                  {isPaid ? addressParts.join(', ') : `${info.city || 'India'} (Address masked)`}
-                </span>
-              </div>
-            )}
-            {v.personalAddress && info.personalAddress && (
-              <div className="px-4 py-3 flex justify-between gap-3">
-                <span className="text-slate-500 shrink-0">Personal Address</span>
-                <span className="text-slate-600 text-right">
-                  {isPaid ? info.personalAddress : 'Personal address masked'}
-                </span>
-              </div>
-            )}
-          </div>
-
-          {visibleSocials.length > 0 && (
-            <div>
-              <div className="text-[11px] font-semibold text-slate-500 mb-2">Connect Online</div>
-              <div className="grid grid-cols-2 gap-2">
-                {visibleSocials.map((s) =>
-                  isPaid ? (
-                    <a
-                      key={s.id}
-                      href={s.url.startsWith('http') ? s.url : `https://${s.url}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-between px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-medium text-slate-800 hover:bg-slate-100"
-                    >
-                      <span className="truncate">{s.label || s.platform}</span>
-                      <ExternalLink className="h-3 w-3 text-slate-400 shrink-0 ml-1" />
-                    </a>
-                  ) : (
-                    <div
-                      key={s.id}
-                      className="flex items-center justify-between px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-medium text-slate-500"
-                    >
-                      <span className="truncate">{s.label || s.platform}</span>
-                      <Lock className="h-3 w-3 text-slate-400 shrink-0 ml-1" />
-                    </div>
-                  )
-                )}
-              </div>
-            </div>
-          )}
-
-          {visibleCustom.length > 0 && (
-            <div>
-              <div className="text-[11px] font-semibold text-slate-500 mb-2">Additional Details</div>
-              <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl text-xs">
-                {visibleCustom.map((cf) => (
-                  <div key={cf.id} className="px-4 py-2.5 flex justify-between gap-3">
-                    <span className="text-slate-500">{cf.label}</span>
-                    <span className="font-medium text-slate-800 text-right">
-                      {isPaid ? cf.value : '••••••'}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <hr className="border-t border-slate-200" />
-          <div className="text-center text-xs text-slate-500">
-            Get your portfolio at: <span className="font-semibold text-[#0B1D3A]">tapnex.in</span>
-          </div>
-        </div>
-      </div>
+      </form>
     </div>
   );
 };
@@ -394,8 +586,13 @@ export const CustomerOverviewPage: React.FC = () => {
       : savedProfileDesign;
   const hasPaid =
     isOrderPaymentConfirmed(orders, activeProfile?.profileId, activeProfile?.slug) ||
-    Boolean(activeProfile?.adminApproved);
-  const publicUrl = activeProfile && hasPaid ? `${window.location.origin}/p/${activeProfile.slug}` : '';
+    Boolean(activeProfile?.adminApproved) ||
+    Boolean(activeProfile?.paymentConfirmed);
+  const isDisabledByAdmin = Boolean(activeProfile?.adminDisabled);
+  const publicUrl =
+    activeProfile && hasPaid && activeProfile.isPublic && !isDisabledByAdmin
+      ? `${window.location.origin}/p/${activeProfile.slug}`
+      : '';
 
   const openAddProfileModal = () => {
     setNewLabel('');
@@ -549,7 +746,7 @@ export const CustomerOverviewPage: React.FC = () => {
                 {activeProfile?.viewsCount ?? 0}
               </div>
               <div className="mt-1 text-xs text-slate-500 tabular-nums">
-                QR/NFC visits resolve after card activation
+                QR/SMART visits resolve after card activation
               </div>
             </div>
           </div>
@@ -566,7 +763,7 @@ export const CustomerOverviewPage: React.FC = () => {
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {appSettings.multipleProfilesEnabled && (
+                {(appSettings.multipleProfilesEnabled || profiles.length === 0) && (
                   <button
                     type="button"
                     onClick={openAddProfileModal}
@@ -628,7 +825,10 @@ export const CustomerOverviewPage: React.FC = () => {
             <div className="mt-4 flex flex-wrap gap-2.5">
               {profiles.map((p) => {
                 const selected = p.profileId === activeProfile?.profileId;
-                const pPaid = isOrderPaymentConfirmed(orders, p.profileId, p.slug) || Boolean(p.adminApproved);
+                const pPaid =
+                  isOrderPaymentConfirmed(orders, p.profileId, p.slug) ||
+                  Boolean(p.adminApproved) ||
+                  Boolean(p.paymentConfirmed);
                 return (
                   <button
                     key={p.profileId}
@@ -807,7 +1007,7 @@ export const CustomerOverviewPage: React.FC = () => {
             >
               <CreditCard className="h-5 w-5 text-[#1D4ED8] shrink-0 mt-0.5" />
               <div>
-                <div className="font-display font-bold text-sm text-[#0B1D3A]">Design & Order NFC Card</div>
+                <div className="font-display font-bold text-sm text-[#0B1D3A]">Design & Order SMART Card</div>
                 <div className="text-xs text-slate-500 mt-1">Customize your 85.6 × 54 mm layout and checkout.</div>
               </div>
             </Link>
@@ -840,13 +1040,15 @@ export const CustomerOverviewPage: React.FC = () => {
   );
 };
 
-// Shared Grouped Sub-Navigation + Profile Switcher Dropdown for Customer Profile Hub
+// Shared Grouped Sub-Navigation + Profile Switcher Dropdown + Create Profile CTA for Customer Profile Hub
 const CustomerProfileHubHeader: React.FC<{
   activeTab: 'profile' | 'social' | 'custom' | 'visibility';
   profiles: ProfileRecord[];
   activeProfile: ProfileRecord | null;
   onSelectProfile: (profileId: string) => void;
-}> = ({ activeTab, profiles, activeProfile, onSelectProfile }) => {
+  onOpenCreateModal?: () => void;
+  canCreateProfile?: boolean;
+}> = ({ activeTab, profiles, activeProfile, onSelectProfile, onOpenCreateModal, canCreateProfile = true }) => {
   const tabs: { id: 'profile' | 'social' | 'custom' | 'visibility'; label: string; to: string }[] = [
     { id: 'profile', label: 'Profile Info', to: '/dashboard/profile' },
     { id: 'social', label: 'Social Links', to: '/dashboard/social-links' },
@@ -856,7 +1058,7 @@ const CustomerProfileHubHeader: React.FC<{
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 mb-6 space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div className="flex flex-wrap gap-1.5 bg-slate-100 p-1 rounded-xl">
           {tabs.map((tab) => (
             <Link
@@ -873,25 +1075,38 @@ const CustomerProfileHubHeader: React.FC<{
           ))}
         </div>
 
-        {profiles.length > 0 && activeProfile && (
-          <div className="flex items-center gap-2 shrink-0">
-            <label htmlFor="profile-switcher-select" className="text-xs font-semibold text-slate-600 whitespace-nowrap">
-              Active Profile:
-            </label>
-            <select
-              id="profile-switcher-select"
-              value={activeProfile.profileId}
-              onChange={(e) => onSelectProfile(e.target.value)}
-              className="px-3 py-2 border border-slate-300 rounded-xl text-xs font-semibold bg-white text-[#0B1D3A] min-w-[200px]"
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          {profiles.length > 0 && activeProfile && (
+            <div className="flex items-center gap-2">
+              <label htmlFor="profile-switcher-select" className="text-xs font-semibold text-slate-600 whitespace-nowrap">
+                Active Profile:
+              </label>
+              <select
+                id="profile-switcher-select"
+                value={activeProfile.profileId}
+                onChange={(e) => onSelectProfile(e.target.value)}
+                className="px-3 py-2 border border-slate-300 rounded-xl text-xs font-semibold bg-white text-[#0B1D3A] min-w-[190px]"
+              >
+                {profiles.map((p) => (
+                  <option key={p.profileId} value={p.profileId}>
+                    {p.profileLabel || p.personalInformation.fullName || p.slug} (/p/{p.slug})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {onOpenCreateModal && (canCreateProfile || profiles.length === 0) && (
+            <button
+              type="button"
+              onClick={onOpenCreateModal}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#1D4ED8] hover:bg-blue-700 text-white text-xs font-semibold shadow-xs whitespace-nowrap"
             >
-              {profiles.map((p) => (
-                <option key={p.profileId} value={p.profileId}>
-                  {p.profileLabel || p.personalInformation.fullName || p.slug} (/p/{p.slug})
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+              <Plus className="h-3.5 w-3.5" />
+              <span>Create Digital Profile</span>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -899,13 +1114,16 @@ const CustomerProfileHubHeader: React.FC<{
 
 // 2. My Profile (Personal Information + Slug)
 export const CustomerProfilePage: React.FC = () => {
-  const { userRecord } = useAuth();
+  const { userRecord, appSettings } = useAuth();
   const { profiles, activeProfile, setActiveProfile, selectProfile, loading, reload } = useActiveCustomerProfile();
   const { notify, confirmAction } = useToast();
   const [slugInput, setSlugInput] = useState('');
   const [previousSlug, setPreviousSlug] = useState('');
   const [slugStatus, setSlugStatus] = useState<'idle' | 'available' | 'taken'>('idle');
   const [saving, setSaving] = useState(false);
+  const [markingPaid, setMarkingPaid] = useState(false);
+  const [paymentRefInput, setPaymentRefInput] = useState('');
+  const [createModalOpen, setCreateModalOpen] = useState(false);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [photoEditorOpen, setPhotoEditorOpen] = useState(false);
@@ -922,6 +1140,7 @@ export const CustomerProfilePage: React.FC = () => {
     if (activeProfile) {
       setSlugInput(activeProfile.slug);
       setPreviousSlug(activeProfile.slug);
+      setPaymentRefInput(activeProfile.paymentReference || '');
       const pi = activeProfile.personalInformation;
       setSameWhatsappAsMobile(Boolean(pi.mobile && pi.whatsapp === pi.mobile));
       setSamePersonalAsBusiness(Boolean(pi.businessAddress && pi.personalAddress === pi.businessAddress));
@@ -1006,12 +1225,50 @@ export const CustomerProfilePage: React.FC = () => {
   if (!activeProfile) {
     return (
       <PortalLayout portal="customer" title="My Profile">
-        <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center">
-          <p className="text-sm text-slate-600">No digital profile found. Create one from Customer Overview.</p>
-          <Link to="/dashboard" className="mt-4 inline-block px-5 py-2.5 bg-[#0B1D3A] text-white rounded-xl text-sm font-semibold">
-            Go to Overview
-          </Link>
+        <CustomerProfileHubHeader
+          activeTab="profile"
+          profiles={profiles}
+          activeProfile={null}
+          onSelectProfile={selectProfile}
+          onOpenCreateModal={() => setCreateModalOpen(true)}
+          canCreateProfile
+        />
+        <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-blue-50 text-[#1D4ED8] flex items-center justify-center mx-auto">
+            <UserCheck className="h-7 w-7" />
+          </div>
+          <div>
+            <h2 className="font-display text-lg font-bold text-[#0B1D3A]">Create Your Digital Profile</h2>
+            <p className="text-sm text-slate-600 mt-1 max-w-md mx-auto">
+              You don&apos;t have a digital profile yet. Create your profile right here to customize your public URL, contact details, photo, and SMART card.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
+            <button
+              type="button"
+              onClick={() => setCreateModalOpen(true)}
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[#1D4ED8] hover:bg-blue-700 text-white text-sm font-semibold shadow-sm"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Create Digital Profile</span>
+            </button>
+            <Link
+              to="/dashboard"
+              className="px-5 py-3 rounded-xl border border-slate-300 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Go to Overview
+            </Link>
+          </div>
         </div>
+        <CreateDigitalProfileModal
+          open={createModalOpen}
+          onClose={() => setCreateModalOpen(false)}
+          profilesCount={profiles.length}
+          onCreated={async (created) => {
+            await reload();
+            notify('Digital profile created', `Now editing "${created.profileLabel}".`, 'success');
+          }}
+        />
       </PortalLayout>
     );
   }
@@ -1019,7 +1276,34 @@ export const CustomerProfilePage: React.FC = () => {
   const info = activeProfile.personalInformation;
   const hasPaid =
     isOrderPaymentConfirmed(orders, activeProfile.profileId, activeProfile.slug) ||
-    Boolean(activeProfile.adminApproved);
+    Boolean(activeProfile.adminApproved) ||
+    Boolean(activeProfile.paymentConfirmed);
+  const isDisabledByAdmin = Boolean(activeProfile.adminDisabled);
+
+  const handleMarkPaymentDone = async () => {
+    if (!userRecord) return;
+    setMarkingPaid(true);
+    try {
+      const updated = await markProfilePaymentCompleted({
+        profile: activeProfile,
+        completed: true,
+        reference: paymentRefInput,
+        actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+        inactiveMessage: appSettings.inactiveProfileMessage,
+      });
+      setActiveProfile(updated);
+      notify(
+        'Payment status marked completed',
+        `Public profile link /p/${updated.slug} is now unlocked and accessible.`,
+        'success'
+      );
+      await reload();
+    } catch (err) {
+      notify('Unable to update payment status', err instanceof Error ? err.message : 'Please try again.', 'error');
+    } finally {
+      setMarkingPaid(false);
+    }
+  };
 
   const handleDeleteCurrentProfile = async () => {
     if (!userRecord) return;
@@ -1045,7 +1329,19 @@ export const CustomerProfilePage: React.FC = () => {
         profiles={profiles}
         activeProfile={activeProfile}
         onSelectProfile={selectProfile}
+        onOpenCreateModal={() => setCreateModalOpen(true)}
+        canCreateProfile={appSettings.multipleProfilesEnabled}
       />
+
+      {isDisabledByAdmin && (
+        <div className="mb-5 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-xs text-rose-900 flex items-center gap-2.5">
+          <Lock className="h-4 w-4 text-rose-600 shrink-0" />
+          <span>
+            <strong>Link Disabled by Administrator:</strong> Your public profile URL is currently deactivated by an admin or superadmin. Please contact support if you believe this is an error.
+          </span>
+        </div>
+      )}
+
       <form onSubmit={handleSave} className="space-y-6">
         {/* Profile Photo & Slug */}
         <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-6">
@@ -1054,7 +1350,7 @@ export const CustomerProfilePage: React.FC = () => {
               <img
                 src={info.photoDataUrl}
                 alt="Profile"
-                className="w-20 h-20 rounded-full object-cover border border-slate-200"
+                className="w-20 h-20 rounded-full object-cover border border-slate-200 bg-transparent"
               />
             ) : (
               <div className="w-20 h-20 rounded-full bg-[#0B1D3A] text-white flex items-center justify-center font-display text-2xl font-bold">
@@ -1083,45 +1379,138 @@ export const CustomerProfilePage: React.FC = () => {
                 )}
               </div>
               <p className="mt-1.5 text-xs text-slate-500">
-                Photos auto-fit to the circle frame on upload. Click <strong>Edit / Crop &amp; Resize Photo</strong> anytime to zoom, drag, or fit your full photo.
+                Photos auto-fit to the circle frame on upload and preserve transparent PNG backgrounds. Click <strong>Edit / Crop &amp; Resize Photo</strong> anytime to zoom, drag, or fit your full photo.
               </p>
             </div>
           </div>
 
-          <div className="pt-5 border-t border-slate-100">
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Unique Public Profile URL
-            </label>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <div className="flex flex-1 items-center border border-slate-300 rounded-lg overflow-hidden bg-slate-50">
-                <span className="px-3 text-xs font-mono text-slate-500 border-r border-slate-200 py-2.5">
-                  {window.location.origin}/p/
-                </span>
-                <input
-                  type="text"
-                  value={slugInput}
-                  onChange={(e) => {
-                    setSlugInput(e.target.value.toLowerCase());
-                    setSlugStatus('idle');
-                  }}
-                  className="flex-1 px-3 py-2 bg-white text-sm font-mono focus:outline-none"
-                  placeholder="jeet-kulkarni"
-                />
+          <div className="pt-5 border-t border-slate-100 space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Unique Public Profile URL Slug
+              </label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <div className="flex flex-1 items-center border border-slate-300 rounded-lg overflow-hidden bg-slate-50">
+                  <span className="px-3 text-xs font-mono text-slate-500 border-r border-slate-200 py-2.5">
+                    {window.location.origin}/p/
+                  </span>
+                  <input
+                    type="text"
+                    value={slugInput}
+                    onChange={(e) => {
+                      setSlugInput(e.target.value.toLowerCase());
+                      setSlugStatus('idle');
+                    }}
+                    className="flex-1 px-3 py-2 bg-white text-sm font-mono focus:outline-none"
+                    placeholder="jeet-kulkarni"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCheckSlug}
+                  className="px-4 py-2.5 rounded-lg border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap"
+                >
+                  Check Availability
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={handleCheckSlug}
-                className="px-4 py-2.5 rounded-lg border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap"
-              >
-                Check Availability
-              </button>
+              {slugStatus === 'available' && (
+                <p className="mt-1.5 text-xs text-emerald-700 font-medium">Slug is available.</p>
+              )}
+              {slugStatus === 'taken' && (
+                <p className="mt-1.5 text-xs text-rose-700 font-medium">Slug is already registered to another profile.</p>
+              )}
             </div>
-            {slugStatus === 'available' && (
-              <p className="mt-1.5 text-xs text-emerald-700 font-medium">Slug is available.</p>
-            )}
-            {slugStatus === 'taken' && (
-              <p className="mt-1.5 text-xs text-rose-700 font-medium">Slug is already registered to another profile.</p>
-            )}
+
+            {/* Public Profile Link & Payment Lock Banner */}
+            <div
+              className={`relative overflow-hidden rounded-xl border p-4 ${
+                hasPaid && !isDisabledByAdmin && activeProfile.isPublic
+                  ? 'border-emerald-200 bg-emerald-50/60'
+                  : 'border-amber-200 bg-amber-50/70'
+              }`}
+            >
+              {!hasPaid && (
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-[0.09] -rotate-6 font-display font-extrabold text-xl tracking-widest text-amber-900 select-none"
+                >
+                  PAYMENT PENDING · LINK MASKED
+                </div>
+              )}
+              <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-[#0B1D3A] flex items-center gap-1.5">
+                    {hasPaid && !isDisabledByAdmin ? (
+                      <>
+                        <Check className="h-3.5 w-3.5 text-emerald-600" />
+                        <span>Public Profile Link (Active &amp; Unlocked)</span>
+                      </>
+                    ) : (
+                      <>
+                        <Lock className="h-3.5 w-3.5 text-amber-600" />
+                        <span>
+                          {isDisabledByAdmin
+                            ? 'Public Profile Link (Disabled by Admin)'
+                            : 'Public Profile Link (Masked Until Payment Completed)'}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <div className="mt-1 font-mono text-xs select-none">
+                    {hasPaid && !isDisabledByAdmin && activeProfile.isPublic ? (
+                      <a
+                        href={`/p/${activeProfile.slug}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[#1D4ED8] hover:underline break-all"
+                      >
+                        {window.location.origin}/p/{activeProfile.slug}
+                      </a>
+                    ) : (
+                      <span className="inline-block px-2 py-0.5 rounded bg-white/80 border border-amber-300 text-slate-500 blur-[1.5px]">
+                        {window.location.origin}/p/••••••••••••
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  {hasPaid && !isDisabledByAdmin && activeProfile.isPublic ? (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const url = `${window.location.origin}/p/${activeProfile.slug}`;
+                        await navigator.clipboard.writeText(url);
+                        notify('Public URL copied', url, 'success');
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white border border-emerald-300 text-xs font-semibold text-emerald-800 hover:bg-emerald-50"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      <span>Copy Live Link</span>
+                    </button>
+                  ) : !hasPaid && !isDisabledByAdmin ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="text"
+                        value={paymentRefInput}
+                        onChange={(e) => setPaymentRefInput(e.target.value)}
+                        placeholder="Txn / Payment Ref (optional)"
+                        className="px-2.5 py-1.5 rounded-lg border border-amber-300 bg-white text-xs font-mono w-44"
+                      />
+                      <button
+                        type="button"
+                        disabled={markingPaid}
+                        onClick={handleMarkPaymentDone}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold disabled:opacity-50"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        <span>{markingPaid ? 'Unlocking...' : 'Mark Payment Completed'}</span>
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1186,13 +1575,12 @@ export const CustomerProfilePage: React.FC = () => {
             />
           </div>
           <div className="md:col-span-2">
-            <label className="block text-xs font-medium text-slate-600 mb-1">Short Biography</label>
-            <textarea
-              rows={3}
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              Short Biography (Rich Formatting: Bold, Italic, Underline, Alignment &amp; Colors)
+            </label>
+            <RichBioEditor
               value={info.shortBio}
-              onChange={(e) => updateInfo('shortBio', e.target.value)}
-              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
-              placeholder="Brief introduction displayed on your public business card profile..."
+              onChange={(html) => updateInfo('shortBio', html)}
             />
           </div>
           <div>
@@ -1432,13 +1820,22 @@ export const CustomerProfilePage: React.FC = () => {
           notify('Photo updated', 'Click Save Profile to publish your cropped photo.', 'success');
         }}
       />
+      <CreateDigitalProfileModal
+        open={createModalOpen}
+        onClose={() => setCreateModalOpen(false)}
+        profilesCount={profiles.length}
+        onCreated={async (created) => {
+          await reload();
+          notify('Digital profile created', `Now editing "${created.profileLabel}".`, 'success');
+        }}
+      />
     </PortalLayout>
   );
 };
 
 // 3. Social Links Manager (Auto-Saves Immediately on Add / Toggle / Move / Delete)
 export const CustomerSocialLinksPage: React.FC = () => {
-  const { profiles, activeProfile, setActiveProfile, selectProfile, loading } = useActiveCustomerProfile();
+  const { profiles, activeProfile, setActiveProfile, selectProfile, loading, reload } = useActiveCustomerProfile();
   const { appSettings } = useAuth();
   const { notify } = useToast();
   const [platform, setPlatform] = useState<SocialPlatformId>('linkedin');
@@ -1446,6 +1843,7 @@ export const CustomerSocialLinksPage: React.FC = () => {
   const [url, setUrl] = useState('');
   const [saving, setSaving] = useState(false);
   const [autoSaveNote, setAutoSaveNote] = useState('');
+  const [createModalOpen, setCreateModalOpen] = useState(false);
 
   const persistSocialProfile = async (nextProfile: ProfileRecord, toastTitle?: string) => {
     setActiveProfile(nextProfile);
@@ -1510,10 +1908,42 @@ export const CustomerSocialLinksPage: React.FC = () => {
     await persistSocialProfile(activeProfile, 'Social links saved');
   };
 
-  if (loading || !activeProfile) {
+  if (loading) {
     return (
       <PortalLayout portal="customer" title="Social Links">
         <div className="h-48 bg-slate-200 rounded-xl animate-pulse" />
+      </PortalLayout>
+    );
+  }
+
+  if (!activeProfile) {
+    return (
+      <PortalLayout portal="customer" title="Social Links">
+        <CustomerProfileHubHeader
+          activeTab="social"
+          profiles={profiles}
+          activeProfile={null}
+          onSelectProfile={selectProfile}
+          onOpenCreateModal={() => setCreateModalOpen(true)}
+          canCreateProfile
+        />
+        <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center space-y-3">
+          <p className="text-sm text-slate-600">Create a digital profile first to add social links.</p>
+          <button
+            type="button"
+            onClick={() => setCreateModalOpen(true)}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#1D4ED8] text-white text-xs font-semibold"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Create Digital Profile</span>
+          </button>
+        </div>
+        <CreateDigitalProfileModal
+          open={createModalOpen}
+          onClose={() => setCreateModalOpen(false)}
+          profilesCount={profiles.length}
+          onCreated={async () => { await reload(); }}
+        />
       </PortalLayout>
     );
   }
@@ -1525,6 +1955,8 @@ export const CustomerSocialLinksPage: React.FC = () => {
         profiles={profiles}
         activeProfile={activeProfile}
         onSelectProfile={selectProfile}
+        onOpenCreateModal={() => setCreateModalOpen(true)}
+        canCreateProfile={appSettings.multipleProfilesEnabled}
       />
       <div className="space-y-6">
         <form onSubmit={handleAdd} className="bg-white border border-slate-200 rounded-2xl p-6 grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
@@ -1669,6 +2101,12 @@ export const CustomerSocialLinksPage: React.FC = () => {
             {saving ? 'Saving...' : 'Save Social Links'}
           </button>
         </div>
+        <CreateDigitalProfileModal
+          open={createModalOpen}
+          onClose={() => setCreateModalOpen(false)}
+          profilesCount={profiles.length}
+          onCreated={async () => { await reload(); }}
+        />
       </div>
     </PortalLayout>
   );
@@ -1676,13 +2114,14 @@ export const CustomerSocialLinksPage: React.FC = () => {
 
 // 4. Custom Fields Manager (Auto-Saves Immediately)
 export const CustomerCustomFieldsPage: React.FC = () => {
-  const { profiles, activeProfile, setActiveProfile, selectProfile, loading } = useActiveCustomerProfile();
+  const { profiles, activeProfile, setActiveProfile, selectProfile, loading, reload } = useActiveCustomerProfile();
   const { appSettings } = useAuth();
   const { notify } = useToast();
   const [label, setLabel] = useState('');
   const [value, setValue] = useState('');
   const [type, setType] = useState<CustomFieldType>('text');
   const [saving, setSaving] = useState(false);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
 
   const persistCustomFields = async (nextProfile: ProfileRecord, toastTitle?: string) => {
     setActiveProfile(nextProfile);
@@ -1722,10 +2161,42 @@ export const CustomerCustomFieldsPage: React.FC = () => {
     await persistCustomFields(activeProfile, 'Custom fields updated');
   };
 
-  if (loading || !activeProfile) {
+  if (loading) {
     return (
       <PortalLayout portal="customer" title="Custom Fields">
         <div className="h-48 bg-slate-200 rounded-xl animate-pulse" />
+      </PortalLayout>
+    );
+  }
+
+  if (!activeProfile) {
+    return (
+      <PortalLayout portal="customer" title="Custom Fields">
+        <CustomerProfileHubHeader
+          activeTab="custom"
+          profiles={profiles}
+          activeProfile={null}
+          onSelectProfile={selectProfile}
+          onOpenCreateModal={() => setCreateModalOpen(true)}
+          canCreateProfile
+        />
+        <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center space-y-3">
+          <p className="text-sm text-slate-600">Create a digital profile first to add custom fields.</p>
+          <button
+            type="button"
+            onClick={() => setCreateModalOpen(true)}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#1D4ED8] text-white text-xs font-semibold"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Create Digital Profile</span>
+          </button>
+        </div>
+        <CreateDigitalProfileModal
+          open={createModalOpen}
+          onClose={() => setCreateModalOpen(false)}
+          profilesCount={profiles.length}
+          onCreated={async () => { await reload(); }}
+        />
       </PortalLayout>
     );
   }
@@ -1737,6 +2208,8 @@ export const CustomerCustomFieldsPage: React.FC = () => {
         profiles={profiles}
         activeProfile={activeProfile}
         onSelectProfile={selectProfile}
+        onOpenCreateModal={() => setCreateModalOpen(true)}
+        canCreateProfile={appSettings.multipleProfilesEnabled}
       />
       <div className="space-y-6">
         <form onSubmit={handleAdd} className="bg-white border border-slate-200 rounded-2xl p-6 grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
@@ -1846,6 +2319,12 @@ export const CustomerCustomFieldsPage: React.FC = () => {
             {saving ? 'Saving...' : 'Save Custom Fields'}
           </button>
         </div>
+        <CreateDigitalProfileModal
+          open={createModalOpen}
+          onClose={() => setCreateModalOpen(false)}
+          profilesCount={profiles.length}
+          onCreated={async () => { await reload(); }}
+        />
       </div>
     </PortalLayout>
   );
@@ -1853,10 +2332,12 @@ export const CustomerCustomFieldsPage: React.FC = () => {
 
 // 5. Public Profile Visibility Controls (Auto-Saves & Syncs Immediately)
 export const CustomerVisibilityPage: React.FC = () => {
-  const { profiles, activeProfile, setActiveProfile, selectProfile, loading } = useActiveCustomerProfile();
+  const { profiles, activeProfile, setActiveProfile, selectProfile, loading, reload } = useActiveCustomerProfile();
   const { userRecord, appSettings } = useAuth();
   const { notify } = useToast();
   const [saving, setSaving] = useState(false);
+  const [markingPaid, setMarkingPaid] = useState(false);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
   const [syncNote, setSyncNote] = useState('');
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -1866,7 +2347,7 @@ export const CustomerVisibilityPage: React.FC = () => {
     getCustomerOrders(userRecord.uid).then(setOrders);
   }, [userRecord]);
 
-  if (loading || !activeProfile) {
+  if (loading) {
     return (
       <PortalLayout portal="customer" title="My Profile & Visibility">
         <div className="h-64 bg-slate-200 rounded-xl animate-pulse" />
@@ -1874,9 +2355,43 @@ export const CustomerVisibilityPage: React.FC = () => {
     );
   }
 
+  if (!activeProfile) {
+    return (
+      <PortalLayout portal="customer" title="My Profile & Visibility">
+        <CustomerProfileHubHeader
+          activeTab="visibility"
+          profiles={profiles}
+          activeProfile={null}
+          onSelectProfile={selectProfile}
+          onOpenCreateModal={() => setCreateModalOpen(true)}
+          canCreateProfile
+        />
+        <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center space-y-3">
+          <p className="text-sm text-slate-600">Create a digital profile first to configure public visibility settings.</p>
+          <button
+            type="button"
+            onClick={() => setCreateModalOpen(true)}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#1D4ED8] text-white text-xs font-semibold"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Create Digital Profile</span>
+          </button>
+        </div>
+        <CreateDigitalProfileModal
+          open={createModalOpen}
+          onClose={() => setCreateModalOpen(false)}
+          profilesCount={profiles.length}
+          onCreated={async () => { await reload(); }}
+        />
+      </PortalLayout>
+    );
+  }
+
   const hasPaid =
     isOrderPaymentConfirmed(orders, activeProfile.profileId, activeProfile.slug) ||
-    Boolean(activeProfile.adminApproved);
+    Boolean(activeProfile.adminApproved) ||
+    Boolean(activeProfile.paymentConfirmed);
+  const isDisabledByAdmin = Boolean(activeProfile.adminDisabled);
   const vis = activeProfile.visibilitySettings;
   const info = activeProfile.personalInformation;
 
@@ -1974,8 +2489,47 @@ export const CustomerVisibilityPage: React.FC = () => {
         profiles={profiles}
         activeProfile={activeProfile}
         onSelectProfile={selectProfile}
+        onOpenCreateModal={() => setCreateModalOpen(true)}
+        canCreateProfile={appSettings.multipleProfilesEnabled}
       />
       <div className="space-y-6">
+        {!hasPaid && !isDisabledByAdmin && (
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="text-xs text-amber-950">
+              <div className="font-bold flex items-center gap-1.5">
+                <Lock className="h-3.5 w-3.5 text-amber-700" />
+                <span>Public Profile Link Masked Until Payment Completed</span>
+              </div>
+              <p className="mt-0.5 text-amber-800">
+                External visitors cannot access your public link until payment is marked completed or approved by an admin.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={markingPaid}
+              onClick={async () => {
+                if (!userRecord) return;
+                setMarkingPaid(true);
+                try {
+                  const updated = await markProfilePaymentCompleted({
+                    profile: activeProfile,
+                    completed: true,
+                    actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+                    inactiveMessage: appSettings.inactiveProfileMessage,
+                  });
+                  setActiveProfile(updated);
+                  notify('Payment marked completed', `/p/${updated.slug} is now live.`, 'success');
+                  await reload();
+                } finally {
+                  setMarkingPaid(false);
+                }
+              }}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold whitespace-nowrap disabled:opacity-50"
+            >
+              {markingPaid ? 'Updating...' : 'Mark Payment Completed'}
+            </button>
+          </div>
+        )}
         <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h2 className="font-display font-bold text-base text-[#0B1D3A]">Public Profile Availability</h2>
@@ -2146,6 +2700,12 @@ export const CustomerVisibilityPage: React.FC = () => {
         onClose={() => setPreviewOpen(false)}
         profile={activeProfile}
         isPaid={hasPaid}
+      />
+      <CreateDigitalProfileModal
+        open={createModalOpen}
+        onClose={() => setCreateModalOpen(false)}
+        profilesCount={profiles.length}
+        onCreated={async () => { await reload(); }}
       />
     </PortalLayout>
   );

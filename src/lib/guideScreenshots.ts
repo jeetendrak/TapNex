@@ -297,11 +297,11 @@ function drawScenePublicLandingAndProfile(
   const leftY = topY + 96;
   ctx.fillStyle = '#1D4ED8';
   ctx.font = '700 13px "Plus Jakarta Sans", sans-serif';
-  ctx.fillText('ISO/IEC 7810 ID-1  ·  NTAG215 NFC + QR HYBRID', leftX, leftY);
+  ctx.fillText('ISO/IEC 7810 ID-1  ·  NTAG215 SMART + QR HYBRID', leftX, leftY);
 
   ctx.fillStyle = '#0B1D3A';
   ctx.font = '800 32px "Plus Jakarta Sans", sans-serif';
-  ctx.fillText('Smart NFC Business Cards', leftX, leftY + 42);
+  ctx.fillText('SMART Business Cards', leftX, leftY + 42);
   ctx.fillText('Built for Instant Exchange.', leftX, leftY + 80);
 
   ctx.fillStyle = '#475569';
@@ -387,16 +387,15 @@ function drawScenePublicLandingAndProfile(
   ctx.fillText('Residential & sustainable spatial architecture across Pune and Mumbai.', cardX + cardW / 2, cardY + 260);
   ctx.textAlign = 'left';
 
-  // Save Contact & WhatsApp buttons
-  drawButton(ctx, cardX + 36, cardY + 284, 244, 46, 'Save Contact (.vcf)', '#0B1D3A', '#FFFFFF', 14);
-  drawButton(ctx, cardX + 300, cardY + 284, 244, 46, 'WhatsApp', '#059669', '#FFFFFF', 14);
+  // Save Contact button (WhatsApp is under Connect Online)
+  drawButton(ctx, cardX + 36, cardY + 284, 508, 46, 'Save Contact (.vcf)  ·  Screen Protected', '#0B1D3A', '#FFFFFF', 14);
 
   // Contact rows
   const rows = [
     ['Mobile', '+91 98230 11240'],
     ['Email', 'priya@studiovastu.in'],
     ['Business Address', 'FC Road 12, Pune, Maharashtra'],
-    ['Social Profiles', 'LinkedIn · Instagram · Behance · Website'],
+    ['Connect Online', 'WhatsApp · LinkedIn · Instagram · Website'],
   ];
   rows.forEach(([k, v], i) => {
     const ry = cardY + 350 + i * 52;
@@ -598,7 +597,7 @@ function drawSceneCustomerCardStudio(
   // Formatting & Width Toolbar
   const barY = box.contentY + 76;
   fillCard(ctx, box.contentX, barY, box.contentW, 54, 12, '#FFFFFF', '#E2E8F0');
-  ['B', 'I', 'U', 'Font: Plus Jakarta', 'Size: 13pt', 'Width: 55%', 'NFC Size: 7.5mm'].forEach((tool, idx) => {
+  ['B', 'I', 'U', 'Align L/C/R', 'Color Palette', 'Width: 55%', 'SMART: 7.5mm'].forEach((tool, idx) => {
     const offsets = [14, 52, 90, 134, 266, 364, 466];
     const widths = [32, 32, 32, 124, 90, 94, 124];
     const tx = box.contentX + offsets[idx];
@@ -610,7 +609,7 @@ function drawSceneCustomerCardStudio(
   });
   drawButton(ctx, box.contentX + box.contentW - 246, barY + 10, 232, 34, '+ Insert Profile Field Dropdown ▾', '#EEF2FF', '#1D4ED8', 11);
 
-  // Left Canvas (Blank / Custom Artwork + Draggable NFC, Logo, Text, QR)
+  // Left Canvas (Blank / Custom Artwork + Draggable SMART, Logo, Text, QR)
   const canvasAreaY = barY + 68;
   const canvasAreaH = box.contentH - 144;
   const leftW = 580;
@@ -618,7 +617,7 @@ function drawSceneCustomerCardStudio(
 
   ctx.fillStyle = '#0B1D3A';
   ctx.font = '700 13px "Plus Jakarta Sans", sans-serif';
-  ctx.fillText('Front Side · Drag Text, Logo, Avatar, QR & NFC Icon Freely · Double-Click Text', box.contentX + 18, canvasAreaY + 26);
+  ctx.fillText('Front Side · Multi-Select Align, Snap Guides, Borders & Arrow Nudge', box.contentX + 18, canvasAreaY + 26);
 
   // Card Render with Bleed & Safe Border
   const cx = box.contentX + 36;
@@ -644,7 +643,7 @@ function drawSceneCustomerCardStudio(
   ctx.strokeRect(cx + 26, cy + 26, cw - 52, ch - 52);
   ctx.restore();
 
-  // Draggable NFC icon selection box
+  // Draggable SMART icon selection box
   ctx.save();
   ctx.strokeStyle = '#38BDF8';
   ctx.lineWidth = 2;
@@ -708,7 +707,7 @@ function drawSceneCustomerCardStudio(
 
   ctx.fillStyle = '#475569';
   ctx.font = '400 12px "Plus Jakarta Sans", sans-serif';
-  ctx.fillText('Drag Logo, Avatar, QR & NFC on both sides.', rightX + 20, bCardY + 244);
+  ctx.fillText('Align, Border, Hex Palette & SMART on both sides.', rightX + 20, bCardY + 244);
   ctx.fillText('Upload custom blank templates anytime.', rightX + 20, bCardY + 262);
   drawButton(ctx, rightX + 20, bCardY + 286, bCardW, 38, 'Proceed to Checkout →', '#1D4ED8', '#FFFFFF', 13);
 
@@ -867,8 +866,8 @@ function drawScenePrinterProductionDispatch(
 
   ctx.fillStyle = '#475569';
   ctx.font = '500 13px "Plus Jakarta Sans", sans-serif';
-  ctx.fillText('Card Type: Matte PVC NFC · Qty: 1 · Dimensions: 85.6 × 54 mm + 3 mm bleed', box.contentX + 20, box.contentY + 64);
-  ctx.fillText('NFC Chip Encode Target URL: https://tapnex.in/p/priya-deshmukh', box.contentX + 20, box.contentY + 86);
+  ctx.fillText('Card Type: Matte PVC SMART · Qty: 1 · Dimensions: 85.6 × 54 mm + 3 mm bleed', box.contentX + 20, box.contentY + 64);
+  ctx.fillText('SMART Chip Encode Target URL: https://tapnex.in/p/priya-deshmukh', box.contentX + 20, box.contentY + 86);
 
   // 300 DPI PDF + QR Export Panel
   fillCard(ctx, box.contentX + 20, box.contentY + 106, leftW - 40, 210, 12, '#F8FAFC', '#CBD5E1');
@@ -1017,7 +1016,7 @@ function drawSceneAdminApprovedPrintTemplates(
   drawButton(ctx, box.contentX + 422, botY + 46, 138, 34, 'Upload Bg Image', '#EEF2FF', '#1D4ED8', 12);
   ctx.fillStyle = '#64748B';
   ctx.font = '400 12px "Plus Jakarta Sans", sans-serif';
-  ctx.fillText('Drag logo, text, NFC wave & QR slot directly on canvas before saving.', box.contentX + 20, botY + 104);
+  ctx.fillText('Drag logo, text, SMART wave & QR slot directly on canvas before saving.', box.contentX + 20, botY + 104);
   drawButton(ctx, box.contentX + 20, botY + 124, 170, 34, 'Save Template Changes', '#0B1D3A', '#FFFFFF', 12);
 
   const rightX = box.contentX + leftW + 18;
@@ -1032,7 +1031,7 @@ function drawSceneAdminApprovedPrintTemplates(
   ctx.fillText('Auto ID: prt_m4x91a_8820k', rightX + 32, botY + 67);
   ctx.fillStyle = '#475569';
   ctx.font = '500 12px "Plus Jakarta Sans", sans-serif';
-  ctx.fillText('Press: Apex NFC Prints · Mumbai · Active', rightX + 20, botY + 104);
+  ctx.fillText('Press: Apex SMART Prints · Mumbai · Active', rightX + 20, botY + 104);
   drawButton(ctx, rightX + 20, botY + 124, 166, 34, 'Generate & Add Printer', '#0B1D3A', '#FFFFFF', 12);
 
   drawCalloutPin(ctx, box.contentX + box.contentW - 150, listY + 60, 1);
@@ -1080,15 +1079,16 @@ function drawSceneAdminOrdersAuditLogs(
   ctx.fillStyle = '#059669';
   ctx.font = '500 11px "Plus Jakarta Sans", sans-serif';
   ctx.fillText('Payment Status: Pending  ·  Manual Admin Approval: ACTIVE', box.contentX + 32, box.contentY + 88);
-  drawButton(ctx, box.contentX + 20, box.contentY + 118, 128, 34, 'Inspect Profile', '#0B1D3A', '#FFFFFF', 12);
-  drawButton(ctx, box.contentX + 158, box.contentY + 118, 198, 34, 'Approve Profile Link (No Pay)', '#059669', '#FFFFFF', 11);
+  drawButton(ctx, box.contentX + 20, box.contentY + 118, 118, 34, 'Inspect Profile', '#0B1D3A', '#FFFFFF', 11);
+  drawButton(ctx, box.contentX + 146, box.contentY + 118, 126, 34, 'Mark Paid', '#059669', '#FFFFFF', 11);
+  drawButton(ctx, box.contentX + 280, box.contentY + 118, 118, 34, 'Disable Link', '#E11D48', '#FFFFFF', 11);
   drawButton(ctx, box.contentX + 20, box.contentY + 162, 134, 34, 'Open /p/:slug', '#EEF2FF', '#1D4ED8', 12);
 
   const rightX = box.contentX + halfW + 18;
   fillCard(ctx, rightX, box.contentY, halfW, 214, 14, '#FFFFFF', '#E2E8F0');
   ctx.fillStyle = '#0B1D3A';
   ctx.font = '700 15px "Plus Jakarta Sans", sans-serif';
-  ctx.fillText('Payment Gateways (Enable / Disable Checkboxes)', rightX + 20, box.contentY + 28);
+  ctx.fillText('Payment Gateways & Test Connection', rightX + 20, box.contentY + 28);
   const gws = [
     ['Razorpay (Sandbox)', true],
     ['Cashfree (Sandbox)', true],
@@ -1112,6 +1112,7 @@ function drawSceneAdminOrdersAuditLogs(
     ctx.fillText(label, gx + 36, gy + 20);
   });
   drawButton(ctx, rightX + 20, box.contentY + 168, 174, 32, 'Save Gateway Settings', '#0B1D3A', '#FFFFFF', 11);
+  drawButton(ctx, rightX + 204, box.contentY + 168, 150, 32, 'Test Connection ✓', '#ECFDF5', '#047857', 11);
 
   // Bottom: Filter-First Security Audit Logs + Orders/CSV Bar
   const logY = box.contentY + 228;

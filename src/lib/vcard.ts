@@ -1,4 +1,5 @@
 import type { PublicProfileRecord } from '../types';
+import { stripHtmlToPlainText } from './richText';
 
 function escapeVCard(val?: string): string {
   if (!val) return '';
@@ -43,8 +44,9 @@ export function buildPublicVCard(profile: PublicProfileRecord, publicUrl: string
     lines.push(`ADR;TYPE=HOME:;;${escapeVCard(info.personalAddress)};;;;`);
   }
 
-  if (info.shortBio) {
-    lines.push(`NOTE:${escapeVCard(info.shortBio)}`);
+  const plainBio = stripHtmlToPlainText(info.shortBio);
+  if (plainBio) {
+    lines.push(`NOTE:${escapeVCard(plainBio)}`);
   }
 
   lines.push('END:VCARD');

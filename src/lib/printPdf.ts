@@ -1,11 +1,25 @@
 import { jsPDF } from 'jspdf';
+import {
+  CARD_BLEED_MM,
+  CARD_SAFE_MARGIN_MM,
+  CARD_TRIM_LANDSCAPE_MM,
+  CARD_TRIM_VERTICAL_MM,
+  PRINT_DPI,
+  getElementBoxMetrics,
+  getFontWidthRatio,
+  getStudioBaseWidthPx,
+  wrapCanvasTextLines,
+} from './cardLayout';
+import { stripHtmlToPlainText } from './richText';
 import type { CardDesignRecord, CardSideDesign, PersonalInformation } from '../types';
 
-export const CARD_TRIM_LANDSCAPE_MM = { width: 85.6, height: 54.0 };
-export const CARD_TRIM_VERTICAL_MM = { width: 54.0, height: 85.6 };
-export const CARD_BLEED_MM = 3.0;
-export const CARD_SAFE_MARGIN_MM = 4.0;
-export const PRINT_DPI = 300;
+export {
+  CARD_BLEED_MM,
+  CARD_SAFE_MARGIN_MM,
+  CARD_TRIM_LANDSCAPE_MM,
+  CARD_TRIM_VERTICAL_MM,
+  PRINT_DPI,
+};
 
 export function mmToPx300Dpi(mm: number): number {
   return Math.round((mm / 25.4) * PRINT_DPI);
@@ -14,12 +28,13 @@ export function mmToPx300Dpi(mm: number): number {
 export function resolveCardTokens(text: string, info: Partial<PersonalInformation>): string {
   const cityState = [info.city, info.state].filter(Boolean).join(', ');
   const fullAddress = [info.businessAddress, info.city, info.state, info.pinCode].filter(Boolean).join(', ');
+  const plainBio = stripHtmlToPlainText(info.shortBio);
   return text
     .replace(/\{\{FULL_NAME\}\}/g, info.fullName || 'Your Name')
     .replace(/\{\{JOB_TITLE\}\}/g, info.jobTitle || 'Your Designation')
     .replace(/\{\{COMPANY\}\}/g, info.companyName || 'Your Company Name')
     .replace(/\{\{BUSINESS_CATEGORY\}\}/g, info.businessCategory || 'Your Business Category')
-    .replace(/\{\{SHORT_BIO\}\}/g, info.shortBio || 'Your Short Bio')
+    .replace(/\{\{SHORT_BIO\}\}/g, plainBio || 'Your Short Bio')
     .replace(/\{\{MOBILE\}\}/g, info.mobile || 'Your Number')
     .replace(/\{\{ALTERNATE_MOBILE\}\}/g, info.alternateMobile || 'Your Alternate Number')
     .replace(/\{\{WHATSAPP\}\}/g, info.whatsapp || info.mobile || 'Your WhatsApp Number')
@@ -58,6 +73,8 @@ async function renderCardSideToCanvas(params: {
   const bleedPx = mmToPx300Dpi(CARD_BLEED_MM);
   const trimPxW = mmToPx300Dpi(trim.width);
   const trimPxH = mmToPx300Dpi(trim.height);
+  const studioBasePx = getStudioBaseWidthPx(params.orientation);
+  const scaleFactor = trimPxW / studioBasePx;
 
   const canvas = document.createElement('canvas');
   canvas.width = pxW;
@@ -86,6 +103,21 @@ async function renderCardSideToCanvas(params: {
     }
   }
 
+  // 2a. Optional Card Outer Border along trim bounds
+  if (params.side.showBorder) {
+    const bwPx = Math.max(2, Math.round((params.side.borderWidthPx ?? 2) * scaleFactor));
+    ctx.save();
+    ctx.strokeStyle = params.side.borderColor || '#D4AF37';
+    ctx.lineWidth = bwPx;
+    ctx.strokeRect(
+      bleedPx + bwPx / 2,
+      bleedPx + bwPx / 2,
+      trimPxW - bwPx,
+      trimPxH - bwPx
+    );
+    ctx.restore();
+  }
+
   // 2b. Editable Shape & Accent Elements (positioned relative to trim area)
   for (const shp of params.side.shapes || []) {
     const sx = bleedPx + (shp.xPct / 100) * trimPxW;
@@ -109,7 +141,7 @@ async function renderCardSideToCanvas(params: {
       const r = Math.min(sw, sh) / 2;
       ctx.roundRect(sx, sy, sw, sh, r);
     } else if (shp.borderRadiusPx && shp.borderRadiusPx > 0) {
-      const r = Math.min(sw / 2, sh / 2, shp.borderRadiusPx * 2.5);
+      const r = Math.min(sw / 2, sh / 2, shp.borderRadiusPx * scaleFactor);
       ctx.roundRect(sx, sy, sw, sh, r);
     } else {
       ctx.rect(sx, sy, sw, sh);
@@ -129,25 +161,25 @@ async function renderCardSideToCanvas(params: {
 
     if (shp.borderWidthPx && shp.borderWidthPx > 0) {
       ctx.strokeStyle = shp.borderColor || '#FFFFFF';
-      ctx.lineWidth = Math.max(2, shp.borderWidthPx * 2.5);
+      ctx.lineWidth = Math.max(2, shp.borderWidthPx * scaleFactor);
       ctx.stroke();
     }
     ctx.restore();
   }
 
-  // 3. Logo (positioned relative to trim area)
+  // 3. Logo (positioned relative to trim area, transparent PNG preserved)
   if (params.side.logoDataUrl) {
     const logoImg = await loadImage(params.side.logoDataUrl);
     if (logoImg) {
       const lx = bleedPx + (params.side.logoX / 100) * trimPxW;
       const ly = bleedPx + (params.side.logoY / 100) * trimPxH;
       const lw = mmToPx300Dpi(params.side.logoWidthMm || 14);
-      const lh = (logoImg.height / logoImg.width) * lw;
+      const lh = (logoImg.height / Math.max(1, logoImg.width)) * lw;
       ctx.drawImage(logoImg, lx, ly, lw, lh);
     }
   }
 
-  // 4. Optional Avatar Photo (supports circle, rounded, square)
+  // 4. Optional Avatar Photo (object-cover center-crop + transparent PNG + optional border)
   if (params.side.showAvatar && params.side.avatarDataUrl) {
     const avImg = await loadImage(params.side.avatarDataUrl);
     if (avImg) {
@@ -155,22 +187,42 @@ async function renderCardSideToCanvas(params: {
       const ay = bleedPx + (params.side.avatarY / 100) * trimPxH;
       const size = mmToPx300Dpi(params.side.avatarSizeMm || 13);
       const shape = params.side.avatarShape || 'circle';
+
+      const traceAvatarPath = () => {
+        ctx.beginPath();
+        if (shape === 'circle') {
+          ctx.arc(ax + size / 2, ay + size / 2, size / 2, 0, Math.PI * 2);
+        } else if (shape === 'rounded') {
+          ctx.roundRect(ax, ay, size, size, size * 0.18);
+        } else {
+          ctx.rect(ax, ay, size, size);
+        }
+      };
+
       ctx.save();
-      ctx.beginPath();
-      if (shape === 'circle') {
-        ctx.arc(ax + size / 2, ay + size / 2, size / 2, 0, Math.PI * 2);
-      } else if (shape === 'rounded') {
-        ctx.roundRect(ax, ay, size, size, size * 0.18);
-      } else {
-        ctx.rect(ax, ay, size, size);
-      }
+      traceAvatarPath();
       ctx.clip();
-      ctx.drawImage(avImg, ax, ay, size, size);
+
+      const coverScale = Math.max(size / Math.max(1, avImg.width), size / Math.max(1, avImg.height));
+      const drawW = avImg.width * coverScale;
+      const drawH = avImg.height * coverScale;
+      const dx = ax + (size - drawW) / 2;
+      const dy = ay + (size - drawH) / 2;
+      ctx.drawImage(avImg, dx, dy, drawW, drawH);
       ctx.restore();
+
+      if (params.side.showAvatarBorder) {
+        ctx.save();
+        traceAvatarPath();
+        ctx.strokeStyle = params.side.avatarBorderColor || '#FFFFFF';
+        ctx.lineWidth = Math.max(3, Math.round(2 * scaleFactor));
+        ctx.stroke();
+        ctx.restore();
+      }
     }
   }
 
-  // 5. NFC Contactless Mark (customizable position & scale inside trim area)
+  // 5. SMART Contactless Mark (customizable position & scale inside trim area)
   if (params.side.showNfcIcon) {
     const cx =
       params.side.nfcX !== undefined
@@ -180,41 +232,55 @@ async function renderCardSideToCanvas(params: {
       params.side.nfcY !== undefined
         ? bleedPx + (params.side.nfcY / 100) * trimPxH
         : bleedPx + mmToPx300Dpi(8);
-    const nfcScale = Math.max(0.5, Math.min(2.5, (params.side.nfcSizeMm || 6) / 6));
+    const iconBoxPx = (params.side.nfcSizeMm || 6) * 3.2 * scaleFactor;
+    const centerX = cx + iconBoxPx * 0.5;
+    const centerY = cy + iconBoxPx * 0.6;
+    ctx.save();
     ctx.strokeStyle = params.side.nfcIconColor || '#38BDF8';
-    ctx.lineWidth = Math.max(2, mmToPx300Dpi(0.45 * nfcScale));
+    ctx.lineWidth = Math.max(2, Math.round(iconBoxPx * 0.095));
     ctx.lineCap = 'round';
     for (let i = 1; i <= 3; i++) {
       ctx.beginPath();
-      ctx.arc(cx, cy, mmToPx300Dpi(1.5 * i * nfcScale), -Math.PI * 0.35, Math.PI * 0.35);
+      ctx.arc(centerX, centerY, iconBoxPx * 0.17 * i, -Math.PI * 0.35, Math.PI * 0.35);
       ctx.stroke();
     }
+    ctx.restore();
   }
 
-  // 6. Text Elements
+  // 6. Text Elements (1:1 box wrapping, alignment anchoring, and font scaling)
   for (const el of params.side.elements) {
     const resolved = resolveCardTokens(el.text, params.info);
-    const fontPx = Math.round((el.fontSizePt / 72) * PRINT_DPI);
+    const box = getElementBoxMetrics(el);
+    const fontPx = Math.round(getFontWidthRatio(el.fontSizePt, params.orientation) * trimPxW);
     const style = el.fontStyle === 'italic' ? 'italic ' : '';
     ctx.font = `${style}${el.fontWeight === 'bold' ? '700' : '400'} ${fontPx}px ${el.fontFamily || '"Plus Jakarta Sans", sans-serif'}`;
     ctx.fillStyle = el.color || '#FFFFFF';
     ctx.textAlign = el.align || 'left';
     ctx.textBaseline = 'top';
-    const tx = bleedPx + (el.xPct / 100) * trimPxW;
-    const ty = bleedPx + (el.yPct / 100) * trimPxH;
-    const maxW = trimPxW * (Math.max(15, Math.min(95, el.maxWidthPct || 84)) / 100);
-    ctx.fillText(resolved, tx, ty, maxW);
-    if (el.textDecoration === 'underline') {
-      const metrics = ctx.measureText(resolved);
-      const lineW = Math.min(metrics.width, maxW);
-      const startX = el.align === 'center' ? tx - lineW / 2 : el.align === 'right' ? tx - lineW : tx;
-      ctx.strokeStyle = el.color || '#FFFFFF';
-      ctx.lineWidth = Math.max(2, Math.round(fontPx * 0.08));
-      ctx.beginPath();
-      ctx.moveTo(startX, ty + fontPx * 1.08);
-      ctx.lineTo(startX + lineW, ty + fontPx * 1.08);
-      ctx.stroke();
-    }
+
+    const boxLeft = bleedPx + (box.leftPct / 100) * trimPxW;
+    const boxTop = bleedPx + (box.topPct / 100) * trimPxH;
+    const maxW = (box.widthPct / 100) * trimPxW;
+    const tx = el.align === 'center' ? boxLeft + maxW / 2 : el.align === 'right' ? boxLeft + maxW : boxLeft;
+
+    const wrappedLines = wrapCanvasTextLines((line) => ctx.measureText(line).width, resolved, maxW);
+    const lineHeightPx = fontPx * 1.25;
+
+    wrappedLines.forEach((line, idx) => {
+      const ly = boxTop + idx * lineHeightPx;
+      ctx.fillText(line, tx, ly);
+      if (el.textDecoration === 'underline' && line.length > 0) {
+        const metrics = ctx.measureText(line);
+        const lineW = Math.min(metrics.width, maxW);
+        const startX = el.align === 'center' ? tx - lineW / 2 : el.align === 'right' ? tx - lineW : tx;
+        ctx.strokeStyle = el.color || '#FFFFFF';
+        ctx.lineWidth = Math.max(2, Math.round(fontPx * 0.08));
+        ctx.beginPath();
+        ctx.moveTo(startX, ly + fontPx * 1.06);
+        ctx.lineTo(startX + lineW, ly + fontPx * 1.06);
+        ctx.stroke();
+      }
+    });
   }
 
   // 7. Actual QR Code (ONLY rendered in print pipeline when verified QR PNG is passed!)
@@ -223,12 +289,12 @@ async function renderCardSideToCanvas(params: {
     if (qrImg) {
       const qx = bleedPx + (params.side.qrSlotX / 100) * trimPxW;
       const qy = bleedPx + (params.side.qrSlotY / 100) * trimPxH;
-      const qSize = mmToPx300Dpi(params.side.qrSizeMm || 20);
+      const qSize = mmToPx300Dpi(params.side.qrSizeMm || 17);
       // White quiet zone backing
       ctx.fillStyle = '#FFFFFF';
-      const pad = mmToPx300Dpi(1);
-      ctx.fillRect(qx - pad, qy - pad, qSize + pad * 2, qSize + pad * 2);
-      ctx.drawImage(qrImg, qx, qy, qSize, qSize);
+      const pad = Math.max(2, Math.round(scaleFactor * 3));
+      ctx.fillRect(qx, qy, qSize, qSize);
+      ctx.drawImage(qrImg, qx + pad, qy + pad, Math.max(4, qSize - pad * 2), Math.max(4, qSize - pad * 2));
     }
   }
 

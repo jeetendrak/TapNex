@@ -16,8 +16,18 @@ import {
   Upload,
   Wifi,
   X,
+  ArrowUpToLine,
+  ArrowDownToLine,
+  AlignVerticalJustifyCenter,
 } from 'lucide-react';
 import { CardCanvasPreview, type CardCanvasTarget } from './CardCanvasPreview';
+import { ColorPaletteField } from './ColorPaletteField';
+import {
+  alignTargetsOnSide,
+  computeSnapAndGuidelines,
+  isSameTarget,
+  type AlignAction,
+} from '../lib/cardLayout';
 import { compressImageFileToDataUrl } from '../lib/qrArtwork';
 import type {
   CardSideDesign,
@@ -80,10 +90,17 @@ export const TemplateVisualEditorModal: React.FC<TemplateVisualEditorModalProps>
   const [activeSide, setActiveSide] = useState<'front' | 'back'>('front');
   const [previewOrientation, setPreviewOrientation] = useState<'landscape' | 'vertical'>('landscape');
   const [inspectorTab, setInspectorTab] = useState<'background' | 'text' | 'media' | 'details'>('background');
-  const [selectedTarget, setSelectedTarget] = useState<CardCanvasTarget | null>(null);
+  const [selectedTargets, setSelectedTargets] = useState<CardCanvasTarget[]>([]);
+  const [guidelines, setGuidelines] = useState<{ vertical: number[]; horizontal: number[] }>({
+    vertical: [],
+    horizontal: [],
+  });
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  const selectedTarget = selectedTargets[0] || null;
+  const setSelectedTarget = (t: CardCanvasTarget | null) => setSelectedTargets(t ? [t] : []);
 
   const currentSide: CardSideDesign = activeSide === 'front' ? draft.frontSpec : draft.backSpec;
 
@@ -109,7 +126,18 @@ export const TemplateVisualEditorModal: React.FC<TemplateVisualEditorModalProps>
     });
   };
 
-  const handleMoveItem = (target: CardCanvasTarget, xPct: number, yPct: number) => {
+  const handleMoveItem = (target: CardCanvasTarget, rawX: number, rawY: number) => {
+    const snap = computeSnapAndGuidelines({
+      side: currentSide,
+      movingTarget: target,
+      candidateX: rawX,
+      candidateY: rawY,
+      orientation: previewOrientation,
+    });
+    const xPct = snap.snappedX;
+    const yPct = snap.snappedY;
+    setGuidelines({ vertical: snap.verticalGuides, horizontal: snap.horizontalGuides });
+
     if (target.kind === 'text') {
       setCurrentSide({
         ...currentSide,
@@ -217,7 +245,7 @@ export const TemplateVisualEditorModal: React.FC<TemplateVisualEditorModalProps>
         ...draft,
         name: draft.name.trim(),
         priceInr: Math.max(0, Number(draft.priceInr) || 0),
-        cardType: (draft.cardType || 'Matte PVC NFC').trim().slice(0, 80),
+        cardType: (draft.cardType || 'Matte PVC SMART').trim().slice(0, 80),
         category: (draft.category || 'Executive').trim().slice(0, 60),
         description: (draft.description || '').trim().slice(0, 400),
       };
@@ -315,7 +343,7 @@ export const TemplateVisualEditorModal: React.FC<TemplateVisualEditorModalProps>
               </div>
             </div>
 
-            <div className="bg-slate-100 border border-slate-200 rounded-2xl p-4 sm:p-6">
+            <div className="bg-slate-100 border border-slate-200 rounded-2xl p-4 sm:p-6 space-y-3">
               <CardCanvasPreview
                 side={currentSide}
                 orientation={previewOrientation}
@@ -323,16 +351,62 @@ export const TemplateVisualEditorModal: React.FC<TemplateVisualEditorModalProps>
                 showPrintGuides
                 interactive
                 selectedTarget={selectedTarget}
-                onSelectTarget={(t) => {
-                  setSelectedTarget(t);
+                selectedTargets={selectedTargets}
+                onSelectTarget={(t, additive) => {
+                  if (!t) {
+                    setSelectedTarget(null);
+                    return;
+                  }
+                  if (additive) {
+                    setSelectedTargets((prev) =>
+                      prev.some((p) => isSameTarget(p, t))
+                        ? prev.filter((p) => !isSameTarget(p, t))
+                        : [...prev, t]
+                    );
+                  } else {
+                    setSelectedTarget(t);
+                  }
                   if (t?.kind === 'text') setInspectorTab('text');
                   else if (t?.kind === 'logo' || t?.kind === 'avatar' || t?.kind === 'qr' || t?.kind === 'nfc') setInspectorTab('media');
                 }}
                 onMoveItem={handleMoveItem}
+                onDragEnd={() => setGuidelines({ vertical: [], horizontal: [] })}
+                guidelines={guidelines}
                 editingTextId={editingTextId}
                 onStartEditText={setEditingTextId}
                 onUpdateTextValue={handleUpdateTextValue}
               />
+              {selectedTargets.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white border border-slate-200">
+                  <span className="text-[11px] font-semibold text-[#0B1D3A]">
+                    {selectedTargets.length} selected (Shift+Click multi-select)
+                  </span>
+                  <div className="flex items-center gap-1">
+                    {(
+                      [
+                        { action: 'left', icon: <AlignLeft className="h-3.5 w-3.5" /> },
+                        { action: 'center', icon: <AlignCenter className="h-3.5 w-3.5" /> },
+                        { action: 'right', icon: <AlignRight className="h-3.5 w-3.5" /> },
+                        { action: 'top', icon: <ArrowUpToLine className="h-3.5 w-3.5" /> },
+                        { action: 'middle', icon: <AlignVerticalJustifyCenter className="h-3.5 w-3.5" /> },
+                        { action: 'bottom', icon: <ArrowDownToLine className="h-3.5 w-3.5" /> },
+                      ] as { action: AlignAction; icon: React.ReactNode }[]
+                    ).map((btn) => (
+                      <button
+                        key={btn.action}
+                        type="button"
+                        onClick={() =>
+                          setCurrentSide(alignTargetsOnSide(currentSide, selectedTargets, btn.action, previewOrientation))
+                        }
+                        className="p-1.5 rounded border border-slate-200 bg-slate-50 hover:bg-[#1D4ED8] hover:text-white text-slate-700"
+                        title={`Align ${btn.action}`}
+                      >
+                        {btn.icon}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="rounded-xl bg-blue-50/70 border border-blue-200 p-3 text-xs text-slate-700 flex items-start gap-2.5">
@@ -417,36 +491,74 @@ export const TemplateVisualEditorModal: React.FC<TemplateVisualEditorModalProps>
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-200">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">Primary Color</label>
-                    <input
-                      type="color"
-                      value={currentSide.backgroundColor || '#0B1D3A'}
-                      onChange={(e) => setCurrentSide({ ...currentSide, backgroundColor: e.target.value })}
-                      className="w-full h-9 rounded border border-slate-300 cursor-pointer"
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200">
+                  <ColorPaletteField
+                    label="Primary Color"
+                    compact
+                    value={currentSide.backgroundColor || '#0B1D3A'}
+                    onChange={(hex) => setCurrentSide({ ...currentSide, backgroundColor: hex })}
+                  />
+                  <div className="space-y-1.5">
+                    <ColorPaletteField
+                      label="Gradient Accent"
+                      compact
+                      value={currentSide.gradientTo || currentSide.backgroundColor || '#0B1D3A'}
+                      onChange={(hex) => setCurrentSide({ ...currentSide, gradientTo: hex })}
                     />
+                    {currentSide.gradientTo && (
+                      <button
+                        type="button"
+                        onClick={() => setCurrentSide({ ...currentSide, gradientTo: '' })}
+                        className="px-2.5 py-1 text-[11px] border border-slate-300 bg-white rounded-lg text-slate-600"
+                      >
+                        Use Solid Color
+                      </button>
+                    )}
                   </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">Gradient Accent</label>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="color"
-                        value={currentSide.gradientTo || currentSide.backgroundColor || '#0B1D3A'}
-                        onChange={(e) => setCurrentSide({ ...currentSide, gradientTo: e.target.value })}
-                        className="w-full h-9 rounded border border-slate-300 cursor-pointer"
+                </div>
+
+                <div className="pt-2 border-t border-slate-200 space-y-2">
+                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(currentSide.showBorder)}
+                      onChange={(e) =>
+                        setCurrentSide({
+                          ...currentSide,
+                          showBorder: e.target.checked,
+                          borderColor: currentSide.borderColor || '#D4AF37',
+                          borderWidthPx: currentSide.borderWidthPx || 2,
+                        })
+                      }
+                      className="h-4 w-4 accent-[#1D4ED8]"
+                    />
+                    <span>Show Card Outer Border ({activeSide === 'front' ? 'Front' : 'Back'})</span>
+                  </label>
+                  {currentSide.showBorder && (
+                    <div className="space-y-2">
+                      <ColorPaletteField
+                        label="Card Border Color"
+                        compact
+                        value={currentSide.borderColor || '#D4AF37'}
+                        onChange={(hex) => setCurrentSide({ ...currentSide, borderColor: hex })}
                       />
-                      {currentSide.gradientTo && (
-                        <button
-                          type="button"
-                          onClick={() => setCurrentSide({ ...currentSide, gradientTo: '' })}
-                          className="px-2.5 py-2 text-[11px] border border-slate-300 bg-white rounded-lg text-slate-600"
-                        >
-                          Solid
-                        </button>
-                      )}
+                      <div>
+                        <label className="block text-[11px] text-slate-600">
+                          Border Thickness: {currentSide.borderWidthPx || 2} px
+                        </label>
+                        <input
+                          type="range"
+                          min={1}
+                          max={6}
+                          value={currentSide.borderWidthPx || 2}
+                          onChange={(e) =>
+                            setCurrentSide({ ...currentSide, borderWidthPx: Number(e.target.value) })
+                          }
+                          className="w-full"
+                        />
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
             )}
@@ -564,17 +676,14 @@ export const TemplateVisualEditorModal: React.FC<TemplateVisualEditorModalProps>
                             className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs font-mono bg-white"
                           />
                         </div>
-                        <div>
-                          <label className="block text-[10px] font-semibold text-slate-500 mb-1">Color</label>
-                          <input
-                            type="color"
-                            value={selectedEl.color}
-                            onChange={(e) => updateSelectedEl({ color: e.target.value })}
-                            className="w-full h-8 rounded border border-slate-300 cursor-pointer"
-                          />
-                        </div>
                       </div>
                     </div>
+                    <ColorPaletteField
+                      label="Text Color (Hex / Palette)"
+                      compact
+                      value={selectedEl.color}
+                      onChange={(hex) => updateSelectedEl({ color: hex })}
+                    />
 
                     <div className="flex flex-wrap items-center gap-1.5">
                       <button
@@ -752,31 +861,30 @@ export const TemplateVisualEditorModal: React.FC<TemplateVisualEditorModalProps>
                           className="h-4 w-4 accent-[#1D4ED8]"
                         />
                         <Wifi className="h-3.5 w-3.5 text-[#1D4ED8]" />
-                        <span>Show NFC Contactless Icon</span>
+                        <span>Show SMART Contactless Icon</span>
                       </label>
-                      {currentSide.showNfcIcon && (
-                        <input
-                          type="color"
-                          value={currentSide.nfcIconColor || '#38BDF8'}
-                          onChange={(e) => setCurrentSide({ ...currentSide, nfcIconColor: e.target.value })}
-                          className="w-9 h-8 rounded border border-slate-300 cursor-pointer"
-                          title="NFC icon color"
-                        />
-                      )}
                     </div>
                     {currentSide.showNfcIcon && (
-                      <div>
-                        <label className="block text-[11px] text-slate-600">
-                          NFC Icon Size: {currentSide.nfcSizeMm || 6} mm (drag NFC icon directly on card)
-                        </label>
-                        <input
-                          type="range"
-                          min={4}
-                          max={14}
-                          value={currentSide.nfcSizeMm || 6}
-                          onChange={(e) => setCurrentSide({ ...currentSide, nfcSizeMm: Number(e.target.value) })}
-                          className="w-full"
+                      <div className="space-y-2">
+                        <ColorPaletteField
+                          label="SMART Icon Color"
+                          compact
+                          value={currentSide.nfcIconColor || '#38BDF8'}
+                          onChange={(hex) => setCurrentSide({ ...currentSide, nfcIconColor: hex })}
                         />
+                        <div>
+                          <label className="block text-[11px] text-slate-600">
+                            SMART Icon Size: {currentSide.nfcSizeMm || 6} mm (drag SMART icon directly on card)
+                          </label>
+                          <input
+                            type="range"
+                            min={4}
+                            max={14}
+                            value={currentSide.nfcSizeMm || 6}
+                            onChange={(e) => setCurrentSide({ ...currentSide, nfcSizeMm: Number(e.target.value) })}
+                            className="w-full"
+                          />
+                        </div>
                       </div>
                     )}
                   </div>

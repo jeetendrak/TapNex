@@ -159,9 +159,13 @@ export interface ProfileRecord {
   visibilitySettings: VisibilitySettings;
   selectedTemplate: string;
   isPublic: boolean;
+  paymentConfirmed?: boolean;
+  paymentCompletedAt?: string;
+  paymentReference?: string;
   adminApproved?: boolean;
   adminApprovedAt?: string;
   adminApprovedBy?: string;
+  adminDisabled?: boolean;
   viewsCount?: number;
   qrScansCount?: number;
   nfcVisitsCount?: number;
@@ -180,9 +184,11 @@ export interface PublicProfileRecord {
   customFields?: CustomFieldItem[];
   themeColor?: string;
   paymentConfirmed?: boolean;
+  paymentCompletedAt?: string;
   adminApproved?: boolean;
   adminApprovedAt?: string;
   adminApprovedBy?: string;
+  adminDisabled?: boolean;
   lastPaidOrderId?: string;
   updatedAt: unknown;
 }
@@ -222,6 +228,9 @@ export interface CardSideDesign {
   backgroundColor: string;
   gradientTo?: string;
   backgroundImageUrl?: string;
+  showBorder?: boolean;
+  borderColor?: string;
+  borderWidthPx?: number;
   logoDataUrl?: string;
   logoX: number;
   logoY: number;
@@ -229,6 +238,8 @@ export interface CardSideDesign {
   avatarDataUrl?: string;
   showAvatar?: boolean;
   avatarShape?: 'circle' | 'rounded' | 'square';
+  showAvatarBorder?: boolean;
+  avatarBorderColor?: string;
   avatarX: number;
   avatarY: number;
   avatarSizeMm?: number;
@@ -406,7 +417,7 @@ export interface SupportTicketRecord {
   orderId?: string;
   subject: string;
   message: string;
-  category: 'Order' | 'Design Revision' | 'NFC Help' | 'Billing' | 'General';
+  category: 'Order' | 'Design Revision' | 'SMART Help' | 'NFC Help' | 'Billing' | 'General';
   status: 'Open' | 'In Progress' | 'Resolved' | 'Closed';
   adminReply?: string;
   createdAt: unknown;

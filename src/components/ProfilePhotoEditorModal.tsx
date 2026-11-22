@@ -12,6 +12,29 @@ interface ProfilePhotoEditorModalProps {
 const VIEWPORT_PX = 256;
 const OUTPUT_PX = 420;
 
+function isAlphaFriendlySource(src: string, img: HTMLImageElement): boolean {
+  if (/^data:image\/(png|webp|svg\+xml)/i.test(src) || /\.(png|webp|svg)(\?|$)/i.test(src)) {
+    return true;
+  }
+  try {
+    const probeW = Math.min(64, Math.max(1, img.width));
+    const probeH = Math.min(64, Math.max(1, img.height));
+    const probe = document.createElement('canvas');
+    probe.width = probeW;
+    probe.height = probeH;
+    const pCtx = probe.getContext('2d');
+    if (!pCtx) return false;
+    pCtx.drawImage(img, 0, 0, probeW, probeH);
+    const pixels = pCtx.getImageData(0, 0, probeW, probeH).data;
+    for (let i = 3; i < pixels.length; i += 4) {
+      if (pixels[i] < 250) return true;
+    }
+  } catch {
+    // CORS-tainted remote image
+  }
+  return false;
+}
+
 export function autoFitImageToSquareDataUrl(src: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -25,8 +48,13 @@ export function autoFitImageToSquareDataUrl(src: string): Promise<string> {
         reject(new Error('Canvas unavailable'));
         return;
       }
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(0, 0, OUTPUT_PX, OUTPUT_PX);
+      const keepAlpha = isAlphaFriendlySource(src, img);
+      if (keepAlpha) {
+        ctx.clearRect(0, 0, OUTPUT_PX, OUTPUT_PX);
+      } else {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, OUTPUT_PX, OUTPUT_PX);
+      }
 
       const scale = Math.max(OUTPUT_PX / img.width, OUTPUT_PX / img.height);
       const drawW = img.width * scale;
@@ -35,7 +63,7 @@ export function autoFitImageToSquareDataUrl(src: string): Promise<string> {
       // Slightly bias vertical portraits upward so heads/eyes remain well-framed
       const dy = img.height > img.width ? (OUTPUT_PX - drawH) * 0.28 : (OUTPUT_PX - drawH) / 2;
       ctx.drawImage(img, dx, dy, drawW, drawH);
-      resolve(canvas.toDataURL('image/jpeg', 0.88));
+      resolve(keepAlpha ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.88));
     };
     img.onerror = () => reject(new Error('Failed to load image'));
     img.src = src;
@@ -150,9 +178,14 @@ export const ProfilePhotoEditorModal: React.FC<ProfilePhotoEditorModalProps> = (
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      // Soft light backdrop if user zoomed out (< 100%) to see whole photo
-      ctx.fillStyle = '#F8FAFC';
-      ctx.fillRect(0, 0, OUTPUT_PX, OUTPUT_PX);
+      const keepAlpha = isAlphaFriendlySource(currentSrc, img);
+      if (keepAlpha) {
+        ctx.clearRect(0, 0, OUTPUT_PX, OUTPUT_PX);
+      } else {
+        // Soft light backdrop only for opaque photos when zoomed out
+        ctx.fillStyle = '#F8FAFC';
+        ctx.fillRect(0, 0, OUTPUT_PX, OUTPUT_PX);
+      }
 
       const ratio = OUTPUT_PX / VIEWPORT_PX;
       const drawScale = coverScale * zoom * ratio;
@@ -169,7 +202,7 @@ export const ProfilePhotoEditorModal: React.FC<ProfilePhotoEditorModalProps> = (
       );
       ctx.restore();
 
-      onSave(canvas.toDataURL('image/jpeg', 0.88));
+      onSave(keepAlpha ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.88));
       onClose();
     } finally {
       setSaving(false);
@@ -217,7 +250,7 @@ export const ProfilePhotoEditorModal: React.FC<ProfilePhotoEditorModalProps> = (
                 });
               }}
               style={{ width: VIEWPORT_PX, height: VIEWPORT_PX }}
-              className="relative overflow-hidden rounded-2xl bg-slate-900 border border-slate-300 cursor-move touch-none select-none shadow-inner"
+              className="relative overflow-hidden rounded-2xl bg-[linear-gradient(45deg,#1e293b_25%,transparent_25%),linear-gradient(-45deg,#1e293b_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#1e293b_75%),linear-gradient(-45deg,transparent_75%,#1e293b_75%)] bg-[length:16px_16px] bg-[position:0_0,0_8px,8px_-8px,-8px_0px] bg-slate-900 border border-slate-300 cursor-move touch-none select-none shadow-inner"
             >
               {currentSrc && (
                 <img
@@ -245,7 +278,7 @@ export const ProfilePhotoEditorModal: React.FC<ProfilePhotoEditorModalProps> = (
               />
             </div>
             <p className="mt-2 text-[11px] text-slate-500">
-              Circle shows the exact area visible on your digital profile and NFC card
+              Circle shows the exact area visible on your digital profile and SMART card
             </p>
           </div>
 

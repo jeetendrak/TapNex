@@ -51,35 +51,35 @@ export const ROLE_CAPABILITY_MATRIX: RoleCapabilityRow[] = [
     accessLevel: 'No Login Required',
     portalEntry: '/ and /p/:slug',
     primaryWorkflows:
-      'Browse card designs & pricing, tap NFC or scan QR to open /p/:slug without signing in, download vCard (.vcf), contact via WhatsApp/Call/Email.',
+      'Browse card designs & pricing, tap SMART card or scan QR to open /p/:slug without signing in, download vCard (.vcf), connect via WhatsApp/Socials under Connect Online, or Call/Email.',
   },
   {
     role: 'Customer (USER)',
     accessLevel: 'Verified Email / Google Sign-In',
     portalEntry: '/dashboard',
     primaryWorkflows:
-      'Create multiple profiles with + Digital Profile modal (Label & Slug), switch profiles via dropdown, design blank/preset 85.6x54mm cards (all elements draggable/resizable), pay via 6 gateways, track 12-step Orders & Tracking.',
+      'Create profiles from Overview or My Profile, use Rich Text Bio editor, mark payment completed to unmask/activate /p/:slug, design blank/preset cards (multi-select, 6-way align, snap guides, borders, color palette, arrow nudge, transparent PNG), pay via 6 gateways, track Orders.',
   },
   {
     role: 'Print Partner (PRINTER)',
     accessLevel: 'Admin-Onboarded Printer UID',
     portalEntry: '/printer/dashboard',
     primaryWorkflows:
-      'View assigned orders, export 300 DPI print-ready PDF (with 3mm bleed & crop marks) and 1024px QR, advance production, dispatch via courier.',
+      'View assigned orders, export 1:1 WYSIWYG 300 DPI print-ready PDF (with 3mm bleed & crop marks) and 1024px QR, encode SMART chip URL, advance production, dispatch via courier.',
   },
   {
     role: 'Operations Admin (ADMIN)',
     accessLevel: 'Assigned by SuperAdmin',
     portalEntry: '/admin/dashboard',
     primaryWorkflows:
-      'Use grouped 6-item hubs to manage Users, Profiles & Printers, inspect full customer profile data, approve profile links without payment, configure/enable 6 payment gateways, Send Approved Designs to Print, and filter audit logs.',
+      'Use grouped 6-item hubs to manage Users, Profiles & Printers, inspect full customer profile data, approve/mark payment completed or Disable/Enable /p/:slug links, test & toggle 6 payment gateways, Send Approved Designs to Print, and filter audit logs.',
   },
   {
     role: 'SuperAdmin (SUPERADMIN)',
     accessLevel: 'Root Governance Role',
     portalEntry: '/superadmin/dashboard',
     primaryWorkflows:
-      'Assign ADMIN/PRINTER roles & permissions, inspect/approve profiles, configure & toggle 6 payment gateways (Razorpay, Cashfree, Easebuzz, PayU, Google Pay, UPI), generate direct URL QRs, tune INR/GST, and run Factory Reset.',
+      'Assign ADMIN/PRINTER roles & permissions, inspect/approve/disable profiles, configure, test & toggle 6 payment gateways (Razorpay, Cashfree, Easebuzz, PayU, Google Pay, UPI), generate direct URL QRs, tune INR/GST, and run Factory Reset.',
   },
 ];
 
@@ -89,19 +89,19 @@ export const ROLE_GUIDES: RoleGuideSpec[] = [
     roleTitle: 'Public Visitor & Card Recipient',
     roleCode: 'PUBLIC',
     portalPath: '/ and /p/:slug',
-    audience: 'Prospects, networking contacts, and NFC/QR scanners',
+    audience: 'Prospects, networking contacts, and SMART/QR scanners',
     overview:
-      'Anyone who visits the TapNex storefront or taps a physical NFC business card (or scans its fallback QR code) lands on a fast, login-free experience at /p/:slug tailored for instant contact exchange.',
+      'Anyone who visits the TapNex storefront or taps a physical SMART business card (or scans its fallback QR code) lands on a fast, login-free experience at /p/:slug tailored for instant contact exchange with screen-capture protection.',
     features: [
       {
         id: 'public-profile-page',
         title: 'Live Digital Business Profile & Marketing Site (No Login Required)',
         route: '/p/:slug · /card-designs · /pricing · /nfc-guide',
         summary:
-          'When a recipient taps an NFC card or scans its QR code, /p/:slug opens directly without any sign-in prompt and renders only fields allowed by the owner once payment is verified or Admin-approved.',
+          'When a recipient taps a SMART card or scans its QR code, /p/:slug opens directly without any sign-in prompt and renders only fields allowed by the owner once payment is completed or Admin-approved (unless disabled by Admin).',
         screenshotId: 'public_landing_and_profile',
         screenshotCaption:
-          'Public Digital Profile (/p/:slug) showing prominent TapNex logo, cropped avatar, bio, and one-tap vCard download without login.',
+          'Public Digital Profile (/p/:slug) showing prominent TapNex logo, cropped avatar, rich biography, one-tap vCard download, WhatsApp under Connect Online, and screen protection.',
         callouts: [
           {
             num: 1,
@@ -111,32 +111,32 @@ export const ROLE_GUIDES: RoleGuideSpec[] = [
           },
           {
             num: 2,
-            title: 'Profile Identity & Biography',
+            title: 'Profile Identity & Rich Formatted Biography',
             detail:
-              'Shows the circular auto-fitted avatar, full name, job title, company, and biography when enabled in Visibility settings.',
+              'Shows the circular/transparent PNG auto-fitted avatar, full name, job title, company, and sanitized rich-text biography (bold, italic, underline, colors, alignment).',
           },
           {
             num: 3,
-            title: 'One-Click Save Contact (.vcf) & WhatsApp',
+            title: 'One-Click Save Contact (.vcf) & Screen Protection',
             detail:
-              'Generates a standards-compliant vCard 3.0 file containing strictly public fields—never exposing hidden alternate phone or private email values.',
+              'Generates a standards-compliant vCard 3.0 file containing strictly public fields while enforcing right-click, save, print, and screenshot watermark protection.',
           },
           {
             num: 4,
-            title: 'Verified Contact, Addresses & Social Links',
+            title: 'Connect Online (WhatsApp & Socials) + Verified Contact Info',
             detail:
-              'Renders mobile, email, website, business/personal address, custom fields, and enabled social icons once payment or Admin approval is active.',
+              'Lists mobile, email, website, addresses, custom fields, and places the clickable WhatsApp link neatly inside the Connect Online section alongside enabled social icons.',
           },
         ],
         steps: [
-          'Tap the physical NFC card against the top edge of an iPhone (XS or newer) or back center of an Android phone, or scan the printed QR code.',
-          'View the digital profile immediately at /p/:slug with zero login or app install required.',
-          'Tap Save Contact to download the .vcf file directly into your phone address book, or tap WhatsApp / Call / Email for instant outreach.',
-          'If a profile is paused or awaiting payment without Admin approval, visitors see a safe status banner instead of exposing private information.',
+          'Tap the physical SMART card against the top edge of an iPhone (XS or newer) or back center of an Android phone, or scan the printed QR code.',
+          'View the digital profile immediately at /p/:slug with zero login or app install required once payment is completed or Admin-approved.',
+          'Tap Save Contact to download the .vcf file directly into your phone address book, or tap WhatsApp / Social icons under Connect Online for instant outreach.',
+          'If a profile is awaiting payment, Admin-disabled, or paused, external visitors see a safe status gate instead of exposing private information.',
         ],
         notes: [
-          'Admins and SuperAdmins can manually activate any /p/:slug link via "Approve Profile Link (No Payment)" even while physical card payment is still pending.',
-          'If a deployed custom host (such as Netlify) prompts visitors to log in before the app loads, disable Visitor Access / Password Protection in Netlify Site Configuration -> Access & security.',
+          'Unpaid profiles are blocked externally and watermarked/masked inside the portal until payment is completed or Admin-approved.',
+          'Admins and SuperAdmins can disable or re-enable any /p/:slug link at any time, and screen-protection overlays blur/watermark attempts to right-click, save, or capture the profile.',
         ],
       },
     ],
@@ -146,100 +146,100 @@ export const ROLE_GUIDES: RoleGuideSpec[] = [
     roleTitle: 'Customer Portal (Card Owner)',
     roleCode: 'USER',
     portalPath: '/dashboard',
-    audience: 'Professionals, founders, and teams creating NFC smart cards',
+    audience: 'Professionals, founders, and teams creating SMART business cards',
     overview:
-      'The Customer Portal uses a clean 6-item grouped sidebar (Overview, My Profile & Visibility, Design My Card, Orders & Tracking, Account & Support, User Guide) so you never have to hunt across cluttered menus.',
+      'The Customer Portal uses a clean 6-item grouped sidebar (Overview, My Profile & Visibility, Design My Card, Orders & Tracking, Account & Support, User Guide) with profile creation, rich bio editing, full WYSIWYG card studio tools, and payment-gated public link unlocking.',
     features: [
       {
         id: 'customer-profile-visibility',
-        title: '+ Digital Profile Workflow, Profile Dropdown, Photo Cropper & Privacy Hub',
+        title: 'Create Profile Anywhere, Rich Bio Editor, Watermarked Link & Privacy Hub',
         route: '/dashboard · /dashboard/profile · /dashboard/social-links · /dashboard/visibility',
         summary:
-          'Create new profiles straight from Overview via the + Digital Profile modal (Label & Custom Slug), switch profiles using the top dropdown under My Profile & Visibility, and manage Social Links, Custom Fields, and Privacy Tabs in one grouped hub.',
+          'Create profiles from Overview OR directly on the My Profile page (+ Create Digital Profile), switch profiles using the top dropdown, format your Short Biography with bold/italic/underline/colors/alignment, and unlock your masked public profile link by marking payment completed.',
         screenshotId: 'customer_profile_visibility',
         screenshotCaption:
-          'Grouped My Profile & Visibility hub showing Profile Dropdown switcher, + Digital Profile workflow, smart copy checkboxes, and privacy controls.',
+          'Grouped My Profile & Visibility hub showing + Create Digital Profile, Profile Dropdown, Rich Bio Editor, Watermarked Unpaid Link, and Visibility controls.',
         callouts: [
           {
             num: 1,
-            title: 'Grouped Sidebar & Hub Tab Bar',
+            title: 'Prominent + Create Digital Profile & Hub Tab Bar',
             detail:
-              'Access Profile Details, Social Links, Custom Fields, and Public Visibility from one unified sidebar entry ("My Profile & Visibility") and top tab strip.',
+              'Create a digital profile straight from Overview OR directly from the My Profile header/empty state, and access Social Links, Custom Fields, and Visibility in one hub.',
           },
           {
             num: 2,
-            title: 'Profile Switcher Dropdown & + Digital Profile Modal',
+            title: 'Watermarked Unpaid Link & Mark Payment Completed',
             detail:
-              'Click + Digital Profile on Dashboard Overview to enter a Profile Label and Custom Slug, or use the top dropdown in My Profile to switch between multiple profiles.',
+              'Before payment, your public URL pill stays masked and watermarked in preview; click Mark Payment Completed (or complete checkout) to unlock the live /p/:slug link.',
           },
           {
             num: 3,
-            title: 'Photo Auto-Fit Cropper & Smart Copy Checkboxes',
+            title: 'Rich Text Biography Editor & Transparent PNG Cropper',
             detail:
-              'Upload and center/zoom your portrait, then tick "Same as Mobile Number" for WhatsApp and "Same as Business Address" for Personal Address.',
+              'Style Short Biography with Bold, Italic, Underline, alignment (L/C/R/J), and custom hex color palette; transparent PNG avatars keep transparency cleanly.',
           },
           {
             num: 4,
             title: 'Auto-Saved Social Links & Field Privacy Toggles',
             detail:
-              'Switch to the Social Links or Visibility tabs in the same hub to add links (auto-saved immediately) and control exactly what renders on /p/:slug.',
+              'Configure social platforms (including WhatsApp under Connect Online) and control field-by-field visibility on /p/:slug.',
           },
         ],
         steps: [
-          'Sign in via Google or verified Email/Password from /login. On Overview, click + Digital Profile, enter your Profile Label (e.g., "Work") and Custom Slug, and submit to jump straight into My Profile.',
-          'When managing multiple profiles under My Profile & Visibility, use the top Select Active Profile dropdown to switch profiles instantly across all tabs.',
-          'Upload your photo, adjust crop/zoom, fill in contact and address details (with Same-as checkboxes), and click Save Profile Changes.',
-          'Use the top hub tabs (Social Links, Custom Fields, Visibility) inside the same view to configure links and privacy checkboxes.',
+          'Sign in via Google or verified Email/Password. Click + Create Digital Profile either on Dashboard Overview or directly on the My Profile page to set your Profile Label and Custom Slug.',
+          'Upload a photo (transparent PNG backgrounds are preserved) and format your Short Biography using Bold, Italic, Underline, Alignment, and Text Color palette.',
+          'Review your Public Profile Link pill: while payment is pending, it stays masked and watermarked. Click Mark Payment Completed or complete order checkout to activate /p/:slug.',
+          'Switch to Social Links, Custom Fields, and Visibility tabs in the same hub to configure Connect Online links and field privacy toggles.',
         ],
         notes: [
-          'Every save synchronizes private profiles/{profileId} and sanitized publicProfiles/{slug} atomically.',
-          'Legacy direct URLs (/dashboard/social-links, /dashboard/custom-fields, /dashboard/visibility) continue working seamlessly inside the grouped hub.',
+          'Every save synchronizes private profiles/{profileId} and sanitized publicProfiles/{slug} atomically, and strips HTML tags cleanly inside exported .vcf contact notes.',
+          'If an Admin disables your profile link, a banner notifies you inside My Profile and external visitors cannot access /p/:slug until re-enabled.',
         ],
       },
       {
         id: 'customer-card-studio',
-        title: 'Blank Canvas & Full Element Card Design Studio (85.6 × 54 mm)',
+        title: 'Pro Card Design Studio: Multi-Select, Alignment, Snap Guides & 1:1 Export',
         route: '/dashboard/card-design',
         summary:
-          'Start from curated finishes OR upload your own Blank Card Template artwork, then drag, resize, style, and edit every single element on both sides—including text width, fonts, colors, logo, avatar, QR slot, and NFC wave icon.',
+          'Start from curated templates or upload front/back blank artwork, select multiple elements to align (Left/Center/Right/Top/Middle/Bottom), snap with live alignment guidelines, nudge with arrow keys (Ctrl+Arrow for 1pt precision), toggle card/avatar borders, and export distortion-free 300 DPI PDFs.',
         screenshotId: 'customer_card_studio',
         screenshotCaption:
-          'Card Design Studio featuring Blank Template Upload, draggable/resizable NFC icon & text width sliders, B/I/U formatting, and Finished Preview.',
+          'Card Design Studio featuring Multi-Select 6-way Alignment, Snap Guidelines, Color Palette with Hex Paste, Border Controls, and 1:1 WYSIWYG Export.',
         callouts: [
           {
             num: 1,
-            title: 'Blank Canvas & Upload Blank Template Artwork',
+            title: 'Multi-Select & 6-Way Alignment + Snap Guidelines',
             detail:
-              'Choose "Blank Custom Card" or upload your own front/back blank template PNG/JPG artwork and solid background colors in ISO 7810 Landscape or Vertical orientation.',
+              'Hold Shift/Ctrl+Click (or select checkboxes) to pick multiple items and align Left, Center, Right, Top, Middle, or Bottom; live center/edge guidelines snap while dragging.',
           },
           {
             num: 2,
-            title: 'Rich Typography, B/I/U, Font & Box Width (%)',
+            title: 'Color Picker Palette (Auto-Saved History + Hex Paste)',
             detail:
-              'Click or double-click any default or custom text element to edit wording, toggle Bold/Italic/Underline, pick font family, size (pt), color, alignment, and text wrap width (%).',
+              'Paste any #RRGGBB hex code directly or pick a color—used swatches automatically save into your reusable Color Palette across text, shapes, borders, and SMART icons.',
           },
           {
             num: 3,
-            title: 'Full Drag-and-Drop for Every Element (Including NFC Icon)',
+            title: 'Arrow Key Nudging, Borders, Wrapping & Transparent PNGs',
             detail:
-              'Drag text, Logo, Avatar, QR slot, and the NFC wave icon freely on the canvas, and adjust Logo size, Avatar size, QR size, and NFC icon size (mm) from the inspector.',
+              'Move selected elements with Arrow keys (hold Ctrl+Arrow for 1-point precision), toggle Card & Avatar borders/thickness, wrap text inside Box Width %, and keep transparent PNG logos clear.',
           },
           {
             num: 4,
-            title: 'Finished Card Preview & Approve Design',
+            title: '1:1 WYSIWYG Preview, PDF Download & Approve Design',
             detail:
-              'Inspect the clean Front & Back / Flip Card finished preview (bleed guides hidden) before clicking Approve Design to unlock Checkout.',
+              'Preview and downloaded 300 DPI print PDFs use the exact same shared geometry engine—eliminating cropped text or stretched elements.',
           },
         ],
         steps: [
-          'Open Design My Card from the sidebar and select "Blank Custom Card (Start From Scratch)" or any preset finish, or upload your own Front/Back blank template image.',
-          'Use the Profile Details dropdown to drop pre-filled profile fields onto the Front or Back canvas without retyping.',
-          'Drag any element (text, Logo, Avatar, QR slot, or NFC wave icon) into place with your mouse; resize element dimensions, text wrap width %, font, color, and B/I/U styling.',
-          'Click Preview Card to verify the finished look, then click Approve Design to unlock multi-gateway Checkout.',
+          'Open Design My Card and pick a template (or upload your own Front/Back blank artwork). Insert profile fields or add custom text, shapes, logos, and QR/SMART icons.',
+          'Use Shift/Ctrl+Click to multi-select items and align them via the 6-way alignment bar, drag with live snap guidelines, or nudge smoothly using Arrow keys and Ctrl+Arrow (1pt).',
+          'Customize colors via hex paste or saved palette swatches, toggle Card/Avatar borders, adjust Box Width (%) for automatic word wrapping, and upload transparent PNGs cleanly.',
+          'Click Preview Card or Download Proof PDF to verify 1:1 WYSIWYG rendering, then click Approve Design to unlock Checkout.',
         ],
         notes: [
           'Double-clicking any text item right on the card lets you edit its copy inline without hunting for sidebar inputs.',
-          'Local Studio drafts cache automatically in browser storage and sync to Firestore on Save Draft or Approve Design.',
+          'Shared card layout geometry guarantees identical line wrapping, fonts, transparent PNGs, and spacing between screen preview and 300 DPI PDF downloads.',
         ],
       },
       {
@@ -281,7 +281,7 @@ export const ROLE_GUIDES: RoleGuideSpec[] = [
           'From an approved design in Studio, click Proceed to Checkout, select card quantity, and confirm your Indian shipping address.',
           'Pick your preferred active payment gateway (Razorpay, Cashfree, Easebuzz, PayU, Google Pay, or Direct UPI) and complete verification.',
           'Open Orders & Tracking in the sidebar, select Order Tracking (or click Track on any order), and choose your order from the dropdown to inspect the 12-stage timeline.',
-          'Use Account & Support -> Help & Support Tickets if you need a post-order revision or NFC setup assistance.',
+          'Use Account & Support -> Help & Support Tickets if you need a post-order revision or SMART setup assistance.',
         ],
         notes: [
           'Standard pan-India manufacturing and courier delivery timeline is 10–15 days from payment verification.',
@@ -295,16 +295,16 @@ export const ROLE_GUIDES: RoleGuideSpec[] = [
     roleTitle: 'Print Partner Portal',
     roleCode: 'PRINTER',
     portalPath: '/printer/dashboard',
-    audience: 'Authorized printing and NFC encoding facilities',
+    audience: 'Authorized printing and SMART encoding facilities',
     overview:
-      'Print partners receive assigned, print-ready customer jobs complete with exact 300 DPI dual-sided PDFs, 1024px/SVG QR artwork, shipping labels, and fulfilment stage controls.',
+      'Print partners receive assigned, print-ready customer jobs complete with 1:1 WYSIWYG 300 DPI dual-sided PDFs, 1024px/SVG QR artwork, shipping labels, and fulfilment stage controls.',
     features: [
       {
         id: 'printer-production-dispatch',
         title: 'Print Queue, 300 DPI PDF Export & Courier Dispatch',
         route: '/printer/dashboard · /printer/orders/:orderId · /printer/profile',
         summary:
-          'Dedicated production console displaying only orders assigned to the authenticated printer facility, with print-ready PDF downloads and dispatch tracking.',
+          'Dedicated production console displaying only orders assigned to the authenticated printer facility, with distortion-free 300 DPI print-ready PDF downloads and dispatch tracking.',
         screenshotId: 'printer_production_dispatch',
         screenshotCaption:
           'Printer Order Detail screen with 300 DPI PDF export, verified QR artwork, 12-step progress controls, and courier dispatch.',
@@ -313,13 +313,13 @@ export const ROLE_GUIDES: RoleGuideSpec[] = [
             num: 1,
             title: 'Assigned Print Queue & Order Summary',
             detail:
-              'Lists assigned orders with card material, quantity, NFC encoding target URL (/p/:slug), and customer shipping address.',
+              'Lists assigned orders with card material, quantity, SMART encoding target URL (/p/:slug), and customer shipping address.',
           },
           {
             num: 2,
             title: '300 DPI Print-Ready PDF & QR Downloads',
             detail:
-              'Exports exact 85.6 x 54 mm (plus 3 mm bleed = 91.6 x 60 mm, 1082 x 709 px) front/back PDFs with crop marks, NFC slot, and embedded verified QR code.',
+              'Exports exact 85.6 x 54 mm (plus 3 mm bleed = 91.6 x 60 mm, 1082 x 709 px) front/back PDFs with crop marks, SMART icon slot, and embedded verified QR code.',
           },
           {
             num: 3,
@@ -337,12 +337,12 @@ export const ROLE_GUIDES: RoleGuideSpec[] = [
         steps: [
           'Log in to the Printer Portal and open Assigned Orders to inspect newly routed jobs.',
           'Open an order and download the 300 DPI Print-Ready PDF (with or without proof guides) along with standalone 1024px PNG/SVG QR files if needed.',
-          'Encode the NTAG215 NFC chip with the displayed customer profile URL (/p/:slug) and update status to Printing in Progress -> Quality Check -> Ready for Dispatch.',
+          'Encode the NTAG215 SMART chip with the displayed customer profile URL (/p/:slug) and update status to Printing in Progress -> Quality Check -> Ready for Dispatch.',
           'Once handed to the courier, enter Courier Name, Tracking Number, and Dispatch Date and click Mark Dispatched.',
         ],
         notes: [
           'Printers can only read and update orders explicitly assigned to their printerId; customer payment mutations are locked.',
-          'Verify NFC chip readability and QR scan contrast during Quality Check before marking Ready for Dispatch.',
+          'Verify SMART chip readability and QR scan contrast during Quality Check before marking Ready for Dispatch.',
         ],
       },
     ],
@@ -358,10 +358,10 @@ export const ROLE_GUIDES: RoleGuideSpec[] = [
     features: [
       {
         id: 'admin-approved-templates',
-        title: 'Cards & Approved Designs Hub, Blank Templates & Print Partners',
+        title: 'Cards & Approved Designs Hub, Template Visibility & Print Partners',
         route: '/admin/card-designs · /admin/approved-designs · /admin/printers',
         summary:
-          'Manage card templates (including Blank Canvas / custom background uploads and mouse-drag positioning), route approved customer designs straight to print, and onboard printing presses with auto Print Auth UIDs.',
+          'Manage card templates (enable/disable catalog checkboxes, set default template, upload front/back artwork, mouse-drag positioning), route approved customer designs straight to print, and onboard printing presses with auto Print Auth UIDs.',
         screenshotId: 'admin_approved_print_templates',
         screenshotCaption:
           'Grouped Cards & Approved Designs hub with Send to Print, Delete controls, Visual Template Editor, and Auto Print Auth IDs.',
@@ -380,9 +380,9 @@ export const ROLE_GUIDES: RoleGuideSpec[] = [
           },
           {
             num: 3,
-            title: 'Visual Template Studio & Blank Upload Support',
+            title: 'Visual Template Studio, Visibility Checkboxes & Default Picker',
             detail:
-              'Edit template name, INR price, finish, description, base colors, upload background/blank card artwork, and drag elements (including NFC slot) before saving.',
+              'Control which templates appear in Customer Studio, set the default template, upload front/back artwork, toggle borders, and drag elements (including SMART wave icon) before saving.',
           },
           {
             num: 4,
@@ -394,7 +394,7 @@ export const ROLE_GUIDES: RoleGuideSpec[] = [
         steps: [
           'Open Cards & Approved Designs -> switch to Approved Designs to review customer-approved cards, inspect Front/Back artwork, or delete unwanted drafts.',
           'Click Send to Print on any approved design, choose quantity, pricing, payment status, Print Partner, and initial workflow stage, then confirm.',
-          'Switch to the Card Templates tab to create new templates or edit existing ones—upload backgrounds and drag text/QR/NFC slots directly on the preview.',
+          'Switch to the Card Templates tab to toggle visibility checkboxes, set the Default template, upload front/back art, and drag text/QR/SMART slots directly on the preview.',
           'Open Users, Profiles & Printers -> Printers tab to onboard press partners with auto-generated Print Auth UIDs and toggle active status.',
         ],
         notes: [
@@ -404,25 +404,25 @@ export const ROLE_GUIDES: RoleGuideSpec[] = [
       },
       {
         id: 'admin-orders-audit',
-        title: 'Full Profile Inspector, Approve Link Without Payment, Gateways & Audit Logs',
+        title: 'Profile Inspector, Mark Paid, Disable/Enable Link, Gateway Test & Audit Logs',
         route: '/admin/profiles · /admin/orders · /admin/settings · /admin/audit-logs',
         summary:
-          'Inspect complete private customer profiles, manually approve /p/:slug links even while payment is pending, toggle enable/disable checkboxes across 6 payment gateways, manage 12-step orders, and filter audit logs.',
+          'Inspect complete private customer profiles (with rich bio rendering), mark payment completed or approve /p/:slug links, disable/enable public links anytime, test & toggle 6 payment gateways, manage 12-step orders, and filter audit logs.',
         screenshotId: 'admin_orders_audit_logs',
         screenshotCaption:
-          'Admin Profile Inspector + Approve Profile Link (No Payment), 6-Gateway Enable Checkboxes, Order Overrides, and Audit Logs.',
+          'Admin Profile Inspector (Mark Paid / Approve / Disable Link), 6-Gateway Enable Checkboxes + Test Connection, Order Overrides, and Audit Logs.',
         callouts: [
           {
             num: 1,
-            title: 'Inspect Full User Profile & Approve Without Payment',
+            title: 'Inspect Full Profile, Mark Paid & Disable/Enable Link',
             detail:
-              'Open any profile in Digital Profiles or User Detail to inspect all private/public fields and click "Approve Profile Link (No Payment)" so /p/:slug works live immediately.',
+              'Inspect all private/public fields in Digital Profiles or User Detail, click Mark Paid or Approve Profile Link to unlock /p/:slug, or click Disable Link to block external access anytime.',
           },
           {
             num: 2,
-            title: '6 Payment Gateways Enable/Disable Checkboxes',
+            title: '6 Payment Gateways + Test Connection Verification',
             detail:
-              'Under Gateways, QR & Reports -> Settings -> Payment Gateways tab, enable/disable Razorpay, Cashfree, Easebuzz, PayU, Google Pay, and UPI via checkboxes and set Live/Sandbox public IDs.',
+              'Under Gateways, QR & Reports -> Settings -> Payment Gateways, enable/disable Razorpay, Cashfree, Easebuzz, PayU, Google Pay, and UPI via checkboxes and click Test Connection to validate keys.',
           },
           {
             num: 3,
@@ -438,14 +438,14 @@ export const ROLE_GUIDES: RoleGuideSpec[] = [
           },
         ],
         steps: [
-          'Open Users, Profiles & Printers -> Digital Profiles (or click View User on any customer) and click Inspect Profile to review all contact details, addresses, social links, and custom fields.',
-          'Click "Approve Profile Link (No Payment)" to unlock /p/:slug immediately even when payment is pending, or "Open /p/:slug" to verify the live public page.',
-          'Open Gateways, QR & Reports -> Settings -> Payment Gateways to toggle gateway checkboxes, set Live/Sandbox mode, enter public Merchant/Key/UPI IDs, and click Save Gateway Settings.',
+          'Open Users, Profiles & Printers -> Digital Profiles (or View User) and click Inspect Profile to review formatted biography, contacts, addresses, and custom fields.',
+          'Click Mark Paid or Approve Profile Link (No Payment) to unlock /p/:slug, or toggle Disable Link / Enable Link to revoke or restore public link access instantly.',
+          'Open Gateways, QR & Reports -> Settings -> Payment Gateways, enable gateways, enter Public Key / App ID / UPI ID, click Test Connection to verify credentials, and Save Gateway Settings.',
           'Open Orders, Payments & Shipping for 12-step overrides or Gateways, QR & Reports -> Audit Logs to query activity by date, role, or keyword.',
         ],
         notes: [
           'Private gateway API secrets and salts stay strictly in server environment variables (.env) and are never stored in Firestore or exposed to browsers.',
-          'Admin-approved public profiles preserve their manual approval status across customer profile edits until explicitly revoked.',
+          'Admin-disabled public links block /p/:slug immediately regardless of prior payment or approval state until re-enabled by an Admin/SuperAdmin.',
         ],
       },
     ],
@@ -483,9 +483,9 @@ export const ROLE_GUIDES: RoleGuideSpec[] = [
           },
           {
             num: 3,
-            title: '6 Payment Gateways Checkboxes & Global Pricing',
+            title: '6 Payment Gateways Checkboxes, Test Connection & Global Pricing',
             detail:
-              'In Gateways & System Settings, toggle between Pricing & Global Policies and Payment Gateways (Razorpay, Cashfree, Easebuzz, PayU, Google Pay, UPI) using per-gateway checkboxes.',
+              'In Gateways & System Settings, toggle between Pricing & Global Policies and Payment Gateways (Razorpay, Cashfree, Easebuzz, PayU, Google Pay, UPI) and test each gateway connection.',
           },
           {
             num: 4,
@@ -497,7 +497,7 @@ export const ROLE_GUIDES: RoleGuideSpec[] = [
         steps: [
           'Open Roles & Permissions to promote team members to ADMIN or PRINTER, then switch to the Admin Permissions Matrix tab to toggle capability checkboxes.',
           'Use URL QR Generator to enter any public HTTPS URL and immediately download print-ready 1024px PNG or SVG vector artwork.',
-          'Open Gateways & System Settings -> Payment Gateways tab to enable/disable gateways with checkboxes, configure Live/Sandbox modes & public keys, and save.',
+          'Open Gateways & System Settings -> Payment Gateways tab to enable/disable gateways with checkboxes, configure Live/Sandbox public keys, click Test Connection, and save.',
           'Use the Pricing & Global Policies tab for GST/shipping rules, or open the Danger Zone tab and type RESET to return the workspace to a fresh blank state.',
         ],
         notes: [

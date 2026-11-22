@@ -44,17 +44,17 @@ const HOW_IT_WORKS_STEPS = [
   },
   {
     step: '03',
-    title: 'Purchase your NFC card',
-    desc: 'Approve your final layout, enter your Indian shipping address, and complete checkout securely through Razorpay.',
+    title: 'Purchase your SMART card',
+    desc: 'Approve your final layout, enter your Indian shipping address, and complete checkout securely.',
   },
   {
     step: '04',
     title: 'Receive your personalized smart card',
-    desc: 'Our print partners produce your 300 DPI card with your unique QR code and encode the NFC chip before dispatching across India (10–15 days).',
+    desc: 'Our print partners produce your 300 DPI card with your unique QR code and encode the SMART chip before dispatching across India (10–15 days).',
   },
   {
     step: '05',
-    title: 'Share your profile through NFC tap or QR scan',
+    title: 'Share your profile through SMART tap or QR scan',
     desc: 'Tap against compatible smartphones or scan the fallback QR code. Visitors view your mobile profile and save your vCard instantly.',
   },
 ];
@@ -67,17 +67,17 @@ const AUDIENCE_BENEFITS = [
   { role: 'Consultants', benefit: 'Maintain separate personal and advisory profiles with custom appointment links and GST details.' },
   { role: 'Real Estate Agents', benefit: 'Share property listings, office addresses, and Google Business locations effortlessly on site visits.' },
   { role: 'Marketing Professionals', benefit: 'Track profile visits and direct engagement across campaigns with instant digital updates.' },
-  { role: 'Corporate Employees', benefit: 'Replace disposable paper stock with durable ISO 7810 ID-1 PVC and metal hybrid NFC cards.' },
+  { role: 'Corporate Employees', benefit: 'Replace disposable paper stock with durable ISO 7810 ID-1 PVC and metal hybrid SMART cards.' },
 ];
 
 const FAQS = [
   {
-    q: 'Do recipients need an app to view my NFC business card?',
-    a: 'No. Modern iOS and Android smartphones open your public profile directly in the mobile browser via NFC tap or camera QR scan.',
+    q: 'Do recipients need an app to view my SMART business card?',
+    a: 'No. Modern iOS and Android smartphones open your public profile directly in the mobile browser via SMART tap or camera QR scan.',
   },
   {
-    q: 'What happens if someone has a smartphone without NFC?',
-    a: 'Every TapNex card includes a high-contrast, print-calibrated QR code on the card pointing to the exact same public profile URL as the NFC chip.',
+    q: 'What happens if someone has a smartphone without SMART tap?',
+    a: 'Every TapNex card includes a high-contrast, print-calibrated QR code on the card pointing to the exact same public profile URL as the SMART chip.',
   },
   {
     q: 'Can I update my phone number or job title after receiving my card?',
@@ -89,7 +89,7 @@ const FAQS = [
   },
   {
     q: 'How long does delivery take within India?',
-    a: 'Once your design is approved and payment is verified, printing, NFC encoding, quality checks, and courier delivery take 10–15 days across India.',
+    a: 'Once your design is approved and payment is verified, printing, SMART chip encoding, quality checks, and courier delivery take 10–15 days across India.',
   },
 ];
 
@@ -119,9 +119,6 @@ export const HomePage: React.FC = () => {
       <section className="bg-white border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14 lg:py-20 grid grid-cols-1 lg:grid-cols-12 gap-10 items-stretch">
           <div className="lg:col-span-6 flex flex-col justify-center">
-            <p className="text-xs font-semibold tracking-wide text-[#1D4ED8] mb-3">
-              ISO/IEC 7810 ID-1 · 85.6 × 54 mm NFC + QR Smart Identity
-            </p>
             <h1
               className="font-display font-extrabold tracking-tight text-[#0B1D3A] leading-[1.08]"
               style={{ fontSize: 'clamp(2.25rem, 4vw, 3.6rem)', textWrap: 'balance' }}
@@ -129,7 +126,7 @@ export const HomePage: React.FC = () => {
               Your Business Identity. One Smart Tap.
             </h1>
             <p className="mt-5 text-base sm:text-lg text-slate-600 leading-relaxed max-w-xl">
-              Share your contact details, business information and social media profiles instantly with a premium NFC business card.
+              Share your contact details, business information and social media profiles instantly with a premium SMART business card.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-4">
               <Link
@@ -159,7 +156,7 @@ export const HomePage: React.FC = () => {
             <div className="group relative h-full min-h-[300px] lg:min-h-[420px] rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 shadow-sm hover:shadow-xl hover:border-blue-300/80 transition-all duration-500">
               <img
                 src={HERO_IMG}
-                alt="Matte deep navy NFC smart business card tapped against a smartphone"
+                alt="Matte deep navy SMART business card tapped against a smartphone"
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
               />
@@ -173,7 +170,7 @@ export const HomePage: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="max-w-2xl">
             <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#0B1D3A] tracking-tight">
-              From Digital Profile to Physical NFC Card in Five Steps
+              From Digital Profile to Physical SMART Card in Five Steps
             </h2>
             <p className="mt-3 text-slate-600 text-base">
               Every card is custom-manufactured to exact ISO dimensions and paired with your permanent public profile link.
@@ -223,13 +220,13 @@ export const HomePage: React.FC = () => {
               <div>
                 <div className="inline-flex items-center gap-2 text-cyan-400 text-xs font-semibold mb-4">
                   <Smartphone className="h-4 w-4" />
-                  <span>One-Tap NFC & Universal QR Fallback</span>
+                  <span>One-Tap SMART &amp; Universal QR Fallback</span>
                 </div>
                 <h3 className="font-display text-2xl font-bold tracking-tight">
                   Update your digital details without reprinting the card.
                 </h3>
                 <p className="mt-3 text-slate-300 text-sm sm:text-base leading-relaxed max-w-xl">
-                  Both the encoded NFC chip and the printed QR code resolve to your permanent profile URL. Change your phone number, title, WhatsApp, or custom links anytime—your physical card keeps working forever.
+                  Both the encoded SMART chip and the printed QR code resolve to your permanent profile URL. Change your phone number, title, WhatsApp, or custom links anytime—your physical card keeps working forever.
                 </p>
               </div>
               <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 gap-4 pt-6 border-t border-slate-800 text-xs text-slate-300">
@@ -280,7 +277,7 @@ export const HomePage: React.FC = () => {
               <div className="group rounded-xl overflow-hidden border border-slate-200 aspect-[4/3] bg-slate-100 shadow-xs hover:shadow-lg hover:border-blue-300/80 transition-all duration-500">
                 <img
                   src={WORKFLOW_IMG}
-                  alt="Professionals exchanging digital business profile with NFC card"
+                  alt="Professionals exchanging digital business profile with SMART card"
                   referrerPolicy="no-referrer"
                   className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
                 />
@@ -339,7 +336,7 @@ export const HomePage: React.FC = () => {
             <div className="lg:col-span-7 space-y-6">
               <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8">
                 <div className="flex items-center justify-between text-xs text-slate-500 mb-4">
-                  <span>{selectedTpl.name} · {selectedTpl.cardType || 'NFC Smart Card'}</span>
+                  <span>{selectedTpl.name} · {(selectedTpl.cardType || 'SMART Card').replace(/NFC/g, 'SMART')}</span>
                   <span className="font-mono tabular-nums">85.6 × 54.0 mm</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-center">
@@ -365,7 +362,7 @@ export const HomePage: React.FC = () => {
               <div className="group rounded-2xl overflow-hidden border border-slate-200 aspect-[16/7] bg-slate-100 shadow-xs hover:shadow-xl hover:border-blue-300/80 transition-all duration-500">
                 <img
                   src={SHOWCASE_IMG}
-                  alt="Luxury matte navy, obsidian black, and pearl white NFC business cards"
+                  alt="Luxury matte navy, obsidian black, and pearl white SMART business cards"
                   referrerPolicy="no-referrer"
                   className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
                 />
@@ -406,7 +403,7 @@ export const HomePage: React.FC = () => {
                 Transparent Card Pricing in INR
               </h2>
               <p className="mt-3 text-slate-300 text-sm leading-relaxed">
-                No recurring subscription required for your digital profile. Pay once per personalized NFC smart card, printed at 300 DPI and delivered across India in 10–15 days.
+                No recurring subscription required for your digital profile. Pay once per personalized SMART business card, printed at 300 DPI and delivered across India in 10–15 days.
               </p>
               <Link
                 to="/pricing"
@@ -419,12 +416,12 @@ export const HomePage: React.FC = () => {
 
             <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-7 flex flex-col justify-between">
               <div>
-                <div className="text-sm font-semibold text-cyan-400">PVC Matte / Gloss NFC</div>
+                <div className="text-sm font-semibold text-cyan-400">PVC Matte / Gloss SMART</div>
                 <div className="mt-2 font-display text-3xl font-bold tabular-nums">₹1,200 – ₹1,500</div>
                 <p className="mt-2 text-xs text-slate-400">Ideal for founders, consultants, and sales teams</p>
                 <ul className="mt-5 space-y-2.5 text-sm text-slate-300">
                   <li className="flex items-center gap-2"><Check className="h-4 w-4 text-cyan-400" /><span>85.6 × 54 mm ISO ID-1 precision trim</span></li>
-                  <li className="flex items-center gap-2"><Check className="h-4 w-4 text-cyan-400" /><span>NTAG215 NFC chip + fallback QR</span></li>
+                  <li className="flex items-center gap-2"><Check className="h-4 w-4 text-cyan-400" /><span>NTAG215 SMART chip + fallback QR</span></li>
                   <li className="flex items-center gap-2"><Check className="h-4 w-4 text-cyan-400" /><span>Live digital profile & vCard download</span></li>
                 </ul>
               </div>
@@ -438,7 +435,7 @@ export const HomePage: React.FC = () => {
 
             <div className="bg-slate-900/90 border border-blue-500/40 rounded-2xl p-7 flex flex-col justify-between">
               <div>
-                <div className="text-sm font-semibold text-cyan-400">Metal Hybrid Executive NFC</div>
+                <div className="text-sm font-semibold text-cyan-400">Metal Hybrid Executive SMART</div>
                 <div className="mt-2 font-display text-3xl font-bold tabular-nums">₹2,000 – ₹2,500</div>
                 <p className="mt-2 text-xs text-slate-400">Brushed dark metal finish for executive presence</p>
                 <ul className="mt-5 space-y-2.5 text-sm text-slate-300">

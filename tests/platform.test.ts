@@ -32,6 +32,17 @@ import {
 } from '../src/lib/printPdf';
 import { generateHighResQrArtwork, generatePrinterAuthId } from '../src/lib/qrArtwork';
 import { ROLE_CAPABILITY_MATRIX, ROLE_GUIDES } from '../src/data/guideContent';
+import {
+  alignTargetsOnSide,
+  computeSnapAndGuidelines,
+  nudgeTargetsOnSide,
+  wrapCanvasTextLines,
+} from '../src/lib/cardLayout';
+import {
+  normalizeHexColor,
+  sanitizeRichBioHtml,
+  stripHtmlToPlainText,
+} from '../src/lib/richText';
 import type { AuditLogRecord, CardDesignRecord, ProfileRecord } from '../src/types';
 
 function makeSampleProfile(overrides: Partial<ProfileRecord> = {}): ProfileRecord {
@@ -727,4 +738,116 @@ describe('Editable Card Templates & Shape Elements', () => {
     expect(sortedWithCustomDefault[0].templateId).toBe('minimal-white');
   });
 });
+
+describe('Design Studio Layout Engine, Rich Bio Sanitizer & Link Controls', () => {
+  it('wraps long card text lines accurately using wrapCanvasTextLines', () => {
+    const measure = (txt: string) => txt.length * 10;
+    const wrapped = wrapCanvasTextLines(measure, 'TapNex Smart Business Identity Systems', 120);
+    expect(wrapped.length).toBeGreaterThan(1);
+    for (const line of wrapped) {
+      expect(measure(line)).toBeLessThanOrEqual(120);
+    }
+
+    const longWord = wrapCanvasTextLines(measure, 'https://verylongcustomdomainexample.tapnex.in/profile', 100);
+    expect(longWord.length).toBeGreaterThan(2);
+    for (const line of longWord) {
+      expect(measure(line)).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it('aligns multiple selected elements, snaps to alignment guidelines, and nudges cleanly', () => {
+    const baseSide = createBlankSideDesign('front');
+    const customSide = {
+      ...baseSide,
+      elements: [
+        { ...baseSide.elements[0], id: 'el_a', xPct: 10, yPct: 20, maxWidthPct: 30 },
+        { ...baseSide.elements[1], id: 'el_b', xPct: 40, yPct: 50, maxWidthPct: 30 },
+      ],
+    };
+
+    const alignedLeft = alignTargetsOnSide(
+      customSide,
+      [
+        { kind: 'text', id: 'el_a' },
+        { kind: 'text', id: 'el_b' },
+      ],
+      'left',
+      'landscape'
+    );
+    expect(alignedLeft.elements[0].xPct).toBe(10);
+    expect(alignedLeft.elements[1].xPct).toBe(10);
+
+    const alignedTop = alignTargetsOnSide(
+      customSide,
+      [
+        { kind: 'text', id: 'el_a' },
+        { kind: 'text', id: 'el_b' },
+      ],
+      'top',
+      'landscape'
+    );
+    expect(alignedTop.elements[0].yPct).toBe(20);
+    expect(alignedTop.elements[1].yPct).toBe(20);
+
+    const snapped = computeSnapAndGuidelines({
+      side: customSide,
+      movingTarget: { kind: 'text', id: 'el_a' },
+      candidateX: 40.5,
+      candidateY: 49.4,
+      orientation: 'landscape',
+    });
+    expect(snapped.snappedX).toBe(40);
+    expect(snapped.snappedY).toBe(50);
+    expect(snapped.verticalGuides.length).toBeGreaterThan(0);
+    expect(snapped.horizontalGuides.length).toBeGreaterThan(0);
+
+    const nudgedFine = nudgeTargetsOnSide(
+      customSide,
+      [{ kind: 'text', id: 'el_a' }],
+      0.25,
+      -0.25
+    );
+    expect(nudgedFine.elements[0].xPct).toBe(10.25);
+    expect(nudgedFine.elements[0].yPct).toBe(19.75);
+    expect(nudgedFine.elements[1].xPct).toBe(40);
+  });
+
+  it('sanitizes rich text biography HTML strictly and preserves safe formatting & hex colors', () => {
+    expect(normalizeHexColor('#abc')).toBe('#AABBCC');
+    expect(normalizeHexColor('1d4ed8')).toBe('#1D4ED8');
+    expect(normalizeHexColor('javascript:alert(1)')).toBeNull();
+
+    const dirty =
+      '<div style="text-align: center" onclick="alert(1)"><strong style="color: #1D4ED8">AI Architect</strong><script>steal()</script><img src="x" onerror="xss()" /> &amp; <em>Founder</em></div>';
+    const clean = sanitizeRichBioHtml(dirty);
+    expect(clean).toContain('text-align: center');
+    expect(clean).toContain('<strong style="color: #1D4ED8">AI Architect</strong>');
+    expect(clean).toContain('<em>Founder</em>');
+    expect(clean).not.toContain('<script');
+    expect(clean).not.toContain('onclick');
+    expect(clean).not.toContain('onerror');
+    expect(clean).not.toContain('<img');
+
+    const plain = stripHtmlToPlainText(clean);
+    expect(plain).toBe('AI Architect & Founder');
+  });
+
+  it('strips rich bio HTML tags when exporting vCard (.vcf) and enforces SMART Help + adminDisabled in firestore.rules', () => {
+    const profileWithRichBio = makeSampleProfile({
+      personalInformation: {
+        ...makeSampleProfile().personalInformation,
+        shortBio: '<p><strong>Executive</strong> <em>Advisor</em><br />Pune</p>',
+      },
+    });
+    const pub = buildSanitizedPublicProfile(profileWithRichBio) as Parameters<typeof buildPublicVCard>[0];
+    const vcf = buildPublicVCard(pub, 'https://tapnex.in/p/aarav-mehta');
+    expect(vcf).toContain('NOTE:Executive Advisor Pune');
+    expect(vcf).not.toContain('<strong>');
+
+    const rules = fs.readFileSync(path.resolve(process.cwd(), 'firestore.rules'), 'utf8');
+    expect(rules).toContain("'SMART Help'");
+    expect(rules).toContain('adminDisabled');
+  });
+});
+
 

@@ -110,16 +110,20 @@ service cloud.firestore {
 
     function isValidProfile(data) {
       return data.keys().hasAll(['profileId', 'uid', 'slug', 'personalInformation', 'visibilitySettings', 'isPublic', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['profileId', 'uid', 'profileLabel', 'slug', 'personalInformation', 'socialLinks', 'customFields', 'visibilitySettings', 'selectedTemplate', 'isPublic', 'adminApproved', 'adminApprovedAt', 'adminApprovedBy', 'viewsCount', 'qrScansCount', 'nfcVisitsCount', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['profileId', 'uid', 'profileLabel', 'slug', 'personalInformation', 'socialLinks', 'customFields', 'visibilitySettings', 'selectedTemplate', 'isPublic', 'paymentConfirmed', 'paymentCompletedAt', 'paymentReference', 'adminApproved', 'adminApprovedAt', 'adminApprovedBy', 'adminDisabled', 'viewsCount', 'qrScansCount', 'nfcVisitsCount', 'createdAt', 'updatedAt']) &&
         isValidId(data.profileId) &&
         isValidId(data.uid) &&
         data.slug is string && data.slug.size() >= 3 && data.slug.size() <= 64 && data.slug.matches('^[a-z0-9\\-]+$') &&
         data.personalInformation is map &&
         data.visibilitySettings is map &&
         data.isPublic is bool &&
+        (!('paymentConfirmed' in data) || data.paymentConfirmed is bool) &&
+        (!('paymentCompletedAt' in data) || (data.paymentCompletedAt is string && data.paymentCompletedAt.size() <= 64)) &&
+        (!('paymentReference' in data) || (data.paymentReference is string && data.paymentReference.size() <= 128)) &&
         (!('adminApproved' in data) || data.adminApproved is bool) &&
         (!('adminApprovedAt' in data) || (data.adminApprovedAt is string && data.adminApprovedAt.size() <= 64)) &&
         (!('adminApprovedBy' in data) || (data.adminApprovedBy is string && data.adminApprovedBy.size() <= 128)) &&
+        (!('adminDisabled' in data) || data.adminDisabled is bool) &&
         (!('profileLabel' in data) || (data.profileLabel is string && data.profileLabel.size() <= 80)) &&
         (!('selectedTemplate' in data) || (data.selectedTemplate is string && data.selectedTemplate.size() <= 80)) &&
         (!('socialLinks' in data) || (data.socialLinks is list && data.socialLinks.size() <= 30)) &&
@@ -131,7 +135,7 @@ service cloud.firestore {
 
     function isValidPublicProfile(data) {
       return data.keys().hasAll(['slug', 'profileId', 'uid', 'isPublic', 'updatedAt']) &&
-        data.keys().hasOnly(['slug', 'profileId', 'uid', 'isPublic', 'unavailableMessage', 'personalInformation', 'socialLinks', 'customFields', 'themeColor', 'paymentConfirmed', 'adminApproved', 'adminApprovedAt', 'adminApprovedBy', 'lastPaidOrderId', 'updatedAt']) &&
+        data.keys().hasOnly(['slug', 'profileId', 'uid', 'isPublic', 'unavailableMessage', 'personalInformation', 'socialLinks', 'customFields', 'themeColor', 'paymentConfirmed', 'paymentCompletedAt', 'adminApproved', 'adminApprovedAt', 'adminApprovedBy', 'adminDisabled', 'lastPaidOrderId', 'updatedAt']) &&
         data.slug is string && data.slug.size() >= 3 && data.slug.size() <= 64 && data.slug.matches('^[a-z0-9\\-]+$') &&
         isValidId(data.profileId) &&
         isValidId(data.uid) &&
@@ -142,9 +146,11 @@ service cloud.firestore {
         (!('customFields' in data) || (data.customFields is list && data.customFields.size() <= 30)) &&
         (!('themeColor' in data) || (data.themeColor is string && data.themeColor.size() <= 32)) &&
         (!('paymentConfirmed' in data) || data.paymentConfirmed is bool) &&
+        (!('paymentCompletedAt' in data) || (data.paymentCompletedAt is string && data.paymentCompletedAt.size() <= 64)) &&
         (!('adminApproved' in data) || data.adminApproved is bool) &&
         (!('adminApprovedAt' in data) || (data.adminApprovedAt is string && data.adminApprovedAt.size() <= 64)) &&
         (!('adminApprovedBy' in data) || (data.adminApprovedBy is string && data.adminApprovedBy.size() <= 128)) &&
+        (!('adminDisabled' in data) || data.adminDisabled is bool) &&
         (!('lastPaidOrderId' in data) || (data.lastPaidOrderId is string && data.lastPaidOrderId.size() <= 128));
     }
 
@@ -254,7 +260,7 @@ service cloud.firestore {
         isValidId(data.uid) &&
         data.subject is string && data.subject.size() >= 3 && data.subject.size() <= 160 &&
         data.message is string && data.message.size() >= 5 && data.message.size() <= 2000 &&
-        data.category in ['Order', 'Design Revision', 'NFC Help', 'Billing', 'General'] &&
+        data.category in ['Order', 'Design Revision', 'SMART Help', 'NFC Help', 'Billing', 'General'] &&
         data.status in ['Open', 'In Progress', 'Resolved', 'Closed'];
     }
 
@@ -359,6 +365,7 @@ service cloud.firestore {
       allow create: if isValidId(profileId) && isActiveUser() && isValidProfile(incoming()) &&
         incoming().uid == request.auth.uid &&
         incoming().get('adminApproved', false) == false &&
+        incoming().get('adminDisabled', false) == false &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
       allow update: if isValidId(profileId) && isValidProfile(incoming()) &&
@@ -369,7 +376,8 @@ service cloud.firestore {
           isAdmin() ||
           (isActiveUser() && existing().uid == request.auth.uid &&
             incoming().get('adminApproved', false) == existing().get('adminApproved', false) &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['profileLabel', 'slug', 'personalInformation', 'socialLinks', 'customFields', 'visibilitySettings', 'selectedTemplate', 'isPublic', 'updatedAt']))
+            incoming().get('adminDisabled', false) == existing().get('adminDisabled', false) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['profileLabel', 'slug', 'personalInformation', 'socialLinks', 'customFields', 'visibilitySettings', 'selectedTemplate', 'isPublic', 'paymentConfirmed', 'paymentCompletedAt', 'paymentReference', 'updatedAt']))
         );
       allow delete: if isValidId(profileId) && (isAdmin() || (isActiveUser() && existing().uid == request.auth.uid));
     }
@@ -385,10 +393,8 @@ service cloud.firestore {
             (!exists(/databases/$(database)/documents/publicProfiles/$(slug)) || existing().uid == request.auth.uid) &&
             (!('adminApproved' in incoming()) || incoming().adminApproved == false ||
               (exists(/databases/$(database)/documents/publicProfiles/$(slug)) && existing().get('adminApproved', false) == true)) &&
-            (!('paymentConfirmed' in incoming()) || incoming().paymentConfirmed == false ||
-              (exists(/databases/$(database)/documents/publicProfiles/$(slug)) && existing().paymentConfirmed == true) ||
-              ('lastPaidOrderId' in incoming() && incoming().lastPaidOrderId is string && isValidId(incoming().lastPaidOrderId) &&
-                existsAfter(/databases/$(database)/documents/payments/$(incoming().lastPaidOrderId)))))
+            ((!exists(/databases/$(database)/documents/publicProfiles/$(slug)) && incoming().get('adminDisabled', false) == false) ||
+              (exists(/databases/$(database)/documents/publicProfiles/$(slug)) && incoming().get('adminDisabled', false) == existing().get('adminDisabled', false))))
         );
       allow delete: if isValidId(slug) && (isAdmin() || (isActiveUser() && existing().uid == request.auth.uid));
     }

@@ -1,15 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { User, Wifi } from 'lucide-react';
+import {
+  getElementBoxMetrics,
+  getFontWidthRatio,
+  getStudioBaseWidthPx,
+  isSameTarget,
+  mmToTrimWidthPct,
+  type SelectableCardTarget,
+} from '../lib/cardLayout';
 import { resolveCardTokens } from '../lib/printPdf';
 import type { CardSideDesign, PersonalInformation } from '../types';
 
-export type CardCanvasTarget =
-  | { kind: 'text'; id: string }
-  | { kind: 'shape'; id: string }
-  | { kind: 'logo' }
-  | { kind: 'avatar' }
-  | { kind: 'qr' }
-  | { kind: 'nfc' };
+export type CardCanvasTarget = SelectableCardTarget;
 
 interface CardCanvasPreviewProps {
   side: CardSideDesign;
@@ -24,8 +26,11 @@ interface CardCanvasPreviewProps {
   showPrintGuides?: boolean;
   interactive?: boolean;
   selectedTarget?: CardCanvasTarget | null;
-  onSelectTarget?: (target: CardCanvasTarget | null) => void;
+  selectedTargets?: CardCanvasTarget[];
+  onSelectTarget?: (target: CardCanvasTarget | null, additive?: boolean) => void;
   onMoveItem?: (target: CardCanvasTarget, xPct: number, yPct: number) => void;
+  onDragEnd?: () => void;
+  guidelines?: { vertical?: number[]; horizontal?: number[] };
   editingTextId?: string | null;
   onStartEditText?: (id: string | null) => void;
   onUpdateTextValue?: (id: string, nextText: string) => void;
@@ -47,8 +52,11 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
   showPrintGuides = false,
   interactive = false,
   selectedTarget,
+  selectedTargets,
   onSelectTarget,
   onMoveItem,
+  onDragEnd,
+  guidelines,
   editingTextId,
   onStartEditText,
   onUpdateTextValue,
@@ -107,8 +115,8 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
       const dyPct = ((e.clientY - dragging.startY) / box.height) * 100;
       const minBound = dragging.target.kind === 'shape' ? -25 : 2;
       const maxBound = dragging.target.kind === 'shape' ? 95 : 88;
-      const nextX = Math.max(minBound, Math.min(maxBound, Math.round(dragging.origXPct + dxPct)));
-      const nextY = Math.max(minBound, Math.min(maxBound, Math.round(dragging.origYPct + dyPct)));
+      const nextX = Number(Math.max(minBound, Math.min(maxBound, dragging.origXPct + dxPct)).toFixed(2));
+      const nextY = Number(Math.max(minBound, Math.min(maxBound, dragging.origYPct + dyPct)).toFixed(2));
       if (!dragging.moved) {
         setDragging((prev) => (prev ? { ...prev, moved: true } : null));
       }
@@ -117,6 +125,7 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
 
     const handleUp = () => {
       setDragging(null);
+      onDragEnd?.();
     };
 
     window.addEventListener('pointermove', handleMove);
@@ -127,7 +136,7 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
       window.removeEventListener('pointerup', handleUp);
       window.removeEventListener('pointercancel', handleUp);
     };
-  }, [dragging, onMoveItem]);
+  }, [dragging, onMoveItem, onDragEnd]);
 
   const startDrag = (
     e: React.PointerEvent,
@@ -136,11 +145,13 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
     origYPct: number
   ) => {
     e.stopPropagation();
-    if (target.kind === 'text') {
+    const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+    if (target.kind === 'text' && !additive) {
       onSelectElement?.(target.id);
     }
-    onSelectTarget?.(target);
+    onSelectTarget?.(target, additive);
     if (!interactive || !onMoveItem) return;
+    if (additive) return;
     if (target.kind === 'text' && activeEditingId === target.id) return;
     setDragging({
       target,
@@ -162,16 +173,16 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
   };
 
   const isTargetSelected = (t: CardCanvasTarget) => {
+    if (selectedTargets && selectedTargets.length > 0) {
+      return selectedTargets.some((s) => isSameTarget(s, t));
+    }
     if (selectedTarget) {
-      if (t.kind !== selectedTarget.kind) return false;
-      if (t.kind === 'text' && selectedTarget.kind === 'text') return t.id === selectedTarget.id;
-      if (t.kind === 'shape' && selectedTarget.kind === 'shape') return t.id === selectedTarget.id;
-      return true;
+      return isSameTarget(selectedTarget, t);
     }
     return t.kind === 'text' && selectedElementId === t.id;
   };
 
-  const studioBasePx = isVertical ? 270 : 440;
+  const studioBasePx = getStudioBaseWidthPx(orientation);
 
   return (
     <div className="w-full flex flex-col items-center">
@@ -186,7 +197,7 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
         }`}
         style={{ aspectRatio, containerType: 'inline-size', ...bgStyle }}
       >
-        {/* Fixed Fit-to-Size Background Image (Locked — user cannot drag or resize once applied) */}
+        {/* Fixed Fit-to-Size Background Image */}
         {side.backgroundImageUrl && (
           <img
             src={side.backgroundImageUrl}
@@ -194,6 +205,16 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
             referrerPolicy="no-referrer"
             draggable={false}
             className="pointer-events-none select-none absolute inset-0 w-full h-full object-cover"
+          />
+        )}
+
+        {/* Optional Card Outer Border */}
+        {side.showBorder && (
+          <div
+            className="pointer-events-none absolute inset-0 rounded-xl z-20"
+            style={{
+              border: `${Math.max(1, side.borderWidthPx ?? 2)}px solid ${side.borderColor || '#D4AF37'}`,
+            }}
           />
         )}
 
@@ -211,7 +232,23 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
           </>
         )}
 
-        {/* Editable Shape / Accent / Divider Layers (Freely Selectable & Draggable in Studio) */}
+        {/* Live Magnetic Alignment Guidelines */}
+        {(guidelines?.vertical || []).map((xPct, idx) => (
+          <div
+            key={`gv-${idx}`}
+            style={{ left: `${xPct}%` }}
+            className="pointer-events-none absolute top-0 bottom-0 w-px bg-cyan-400 shadow-[0_0_4px_rgba(34,211,238,0.8)] z-40"
+          />
+        ))}
+        {(guidelines?.horizontal || []).map((yPct, idx) => (
+          <div
+            key={`gh-${idx}`}
+            style={{ top: `${yPct}%` }}
+            className="pointer-events-none absolute left-0 right-0 h-px bg-cyan-400 shadow-[0_0_4px_rgba(34,211,238,0.8)] z-40"
+          />
+        ))}
+
+        {/* Editable Shape / Accent / Divider Layers */}
         {(side.shapes || []).map((shp) => {
           const isSelected = isTargetSelected({ kind: 'shape', id: shp.id });
           const shapeBg: React.CSSProperties =
@@ -247,12 +284,12 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
               className={`absolute transition-shadow ${
                 interactive ? 'cursor-move touch-none hover:ring-1 hover:ring-cyan-400' : 'pointer-events-none'
               } ${isSelected ? 'ring-2 ring-cyan-400' : ''}`}
-              title={interactive ? 'Click to edit shape · Drag to move' : undefined}
+              title={interactive ? 'Click to select (Shift+Click for multi-select) · Drag to move' : undefined}
             />
           );
         })}
 
-        {/* Company Logo (Freely Draggable in Studio) */}
+        {/* Company Logo (Transparent PNG friendly, 1:1 mm width parity) */}
         {side.logoDataUrl && (
           <button
             type="button"
@@ -261,9 +298,9 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
             style={{
               left: `${side.logoX}%`,
               top: `${side.logoY}%`,
-              width: `${Math.max(10, Math.min(40, (side.logoWidthMm || 14) * 1.15))}%`,
+              width: `${mmToTrimWidthPct(side.logoWidthMm || 14, orientation)}%`,
             }}
-            className={`absolute p-0.5 rounded transition-shadow ${
+            className={`absolute bg-transparent p-0 rounded transition-shadow ${
               interactive ? 'cursor-move touch-none hover:ring-1 hover:ring-cyan-400' : 'cursor-default pointer-events-none'
             } ${isTargetSelected({ kind: 'logo' }) ? 'ring-2 ring-cyan-400' : ''}`}
             title={interactive ? 'Drag to move Logo' : undefined}
@@ -272,12 +309,12 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
               src={side.logoDataUrl}
               alt="Company logo"
               draggable={false}
-              className="w-full h-auto max-h-20 object-contain pointer-events-none"
+              className="w-full h-auto object-contain pointer-events-none"
             />
           </button>
         )}
 
-        {/* Profile Photo / Avatar (Freely Draggable in Studio, supports Circle / Rounded / Square) */}
+        {/* Profile Photo / Avatar (Transparent PNG friendly, optional border, 1:1 mm size parity) */}
         {side.showAvatar && (() => {
           const resolvedPhoto = side.avatarDataUrl || personalInfo.photoDataUrl;
           const shapeClass =
@@ -294,10 +331,15 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
               style={{
                 left: `${side.avatarX}%`,
                 top: `${side.avatarY}%`,
-                width: `${Math.max(10, Math.min(34, (side.avatarSizeMm || 13) * 1.15))}%`,
+                width: `${mmToTrimWidthPct(side.avatarSizeMm || 13, orientation)}%`,
                 aspectRatio: '1 / 1',
+                border: side.showAvatarBorder
+                  ? `2px solid ${side.avatarBorderColor || '#FFFFFF'}`
+                  : 'none',
               }}
-              className={`absolute ${shapeClass} overflow-hidden border-2 border-white/80 shadow-xs flex items-center justify-center bg-slate-200 ${
+              className={`absolute ${shapeClass} overflow-hidden flex items-center justify-center ${
+                resolvedPhoto ? 'bg-transparent' : 'bg-slate-200'
+              } ${
                 interactive ? 'cursor-move touch-none hover:ring-2 hover:ring-cyan-400' : 'cursor-default pointer-events-none'
               } ${isTargetSelected({ kind: 'avatar' }) ? 'ring-2 ring-cyan-400' : ''}`}
               title={interactive ? 'Drag to move Photo · Click to upload/crop/resize' : undefined}
@@ -324,7 +366,7 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
           );
         })()}
 
-        {/* NFC Contactless Symbol (Freely Draggable & Resizable in Studio) */}
+        {/* SMART Contactless Symbol (Freely Draggable & Resizable in Studio) */}
         {side.showNfcIcon && (
           <button
             type="button"
@@ -337,13 +379,13 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
               top: `${side.nfcY ?? 10}%`,
               color: side.nfcIconColor || '#38BDF8',
             }}
-            className={`absolute p-1 rounded rotate-90 transition-shadow ${
+            className={`absolute p-0.5 rounded rotate-90 transition-shadow ${
               interactive
                 ? 'cursor-move touch-none hover:ring-1 hover:ring-cyan-400'
                 : 'pointer-events-none'
             } ${isTargetSelected({ kind: 'nfc' }) ? 'ring-2 ring-cyan-400 bg-slate-900/20' : ''}`}
-            aria-label="NFC enabled card"
-            title={interactive ? 'Drag to move NFC icon' : undefined}
+            aria-label="SMART enabled card"
+            title={interactive ? 'Drag to move SMART icon' : undefined}
           >
             <Wifi
               className="pointer-events-none"
@@ -355,12 +397,12 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
           </button>
         )}
 
-        {/* Editable Text Elements (Freely Draggable + Double-Click Inline Edit + Bold/Italic/Underline) */}
+        {/* Editable Text Elements (1:1 Box Wrapping + Alignment + Multi-Select + Double-Click Inline Edit) */}
         {side.elements.map((el) => {
           const isSelected = isTargetSelected({ kind: 'text', id: el.id });
           const isEditing = interactive && activeEditingId === el.id && Boolean(onUpdateTextValue);
-          const studioFontPx = Math.max(9, Math.round(el.fontSizePt * 1.35));
-          const fontCqw = ((studioFontPx / studioBasePx) * 100).toFixed(3);
+          const fontCqw = (getFontWidthRatio(el.fontSizePt, orientation) * 100).toFixed(3);
+          const box = getElementBoxMetrics(el);
 
           if (isEditing) {
             return (
@@ -392,8 +434,9 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
                   }
                 }}
                 style={{
-                  left: `${el.xPct}%`,
-                  top: `${el.yPct}%`,
+                  left: `${box.leftPct}%`,
+                  top: `${box.topPct}%`,
+                  width: `${box.widthPct}%`,
                   color: el.color,
                   fontFamily: el.fontFamily,
                   fontWeight: el.fontWeight === 'bold' ? 700 : 400,
@@ -402,7 +445,7 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
                   fontSize: `${fontCqw}cqw`,
                   textAlign: el.align,
                 }}
-                className="absolute z-30 min-w-[35%] max-w-[84%] px-1.5 py-0.5 rounded border-2 border-cyan-400 bg-slate-950/75 outline-none shadow-md leading-tight"
+                className="absolute z-30 px-1 py-0.5 rounded border-2 border-cyan-400 bg-slate-950/80 outline-none shadow-md leading-[1.25]"
               />
             );
           }
@@ -426,9 +469,9 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
                 setActiveEditing(el.id);
               }}
               style={{
-                left: `${el.xPct}%`,
-                top: `${el.yPct}%`,
-                maxWidth: `${Math.max(15, Math.min(95, el.maxWidthPct || 82))}%`,
+                left: `${box.leftPct}%`,
+                top: `${box.topPct}%`,
+                width: `${box.widthPct}%`,
                 color: el.color,
                 fontFamily: el.fontFamily,
                 fontWeight: el.fontWeight === 'bold' ? 700 : 400,
@@ -436,13 +479,16 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
                 textDecoration: el.textDecoration === 'underline' ? 'underline' : 'none',
                 fontSize: `${fontCqw}cqw`,
                 textAlign: el.align,
+                whiteSpace: 'normal',
+                overflowWrap: 'break-word',
+                wordBreak: 'break-word',
               }}
-              className={`absolute truncate leading-tight transition-shadow ${
+              className={`absolute leading-[1.25] transition-shadow ${
                 interactive || onSelectElement || onSelectTarget
-                  ? 'cursor-move touch-none hover:ring-1 hover:ring-cyan-400 rounded px-0.5'
+                  ? 'cursor-move touch-none hover:ring-1 hover:ring-cyan-400 rounded'
                   : 'cursor-default'
-              } ${isSelected ? 'ring-2 ring-cyan-400 bg-slate-900/15 rounded px-0.5' : ''}`}
-              title={interactive ? 'Click to select · Drag to move · Double-click to edit text' : undefined}
+              } ${isSelected ? 'ring-2 ring-cyan-400 bg-slate-900/15 rounded' : ''}`}
+              title={interactive ? 'Click to select (Shift+Click multi-select) · Drag to move · Double-click to edit' : undefined}
             >
               {renderedText || (interactive ? <span className="opacity-50 italic">Empty text</span> : '')}
             </button>
@@ -458,10 +504,10 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
             style={{
               left: `${side.qrSlotX}%`,
               top: `${side.qrSlotY}%`,
-              width: `${Math.max(16, Math.min(38, side.qrSizeMm * 1.15))}%`,
+              width: `${mmToTrimWidthPct(side.qrSizeMm || 17, orientation)}%`,
               aspectRatio: '1 / 1',
             }}
-            className={`absolute bg-white rounded-md p-1.5 flex items-center justify-center shadow-xs border border-slate-200 ${
+            className={`absolute bg-white rounded-md p-1 flex items-center justify-center shadow-xs border border-slate-200 ${
               interactive ? 'cursor-move touch-none hover:ring-2 hover:ring-cyan-400' : 'cursor-default'
             } ${isTargetSelected({ kind: 'qr' }) ? 'ring-2 ring-cyan-400' : ''}`}
             title={interactive ? 'Drag to adjust QR Code position' : undefined}
@@ -516,3 +562,4 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
     </div>
   );
 };
+

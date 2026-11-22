@@ -239,7 +239,7 @@ export const RegisterPage: React.FC = () => {
           </div>
           <h1 className="font-display text-2xl font-bold text-[#0B1D3A]">Create your TapNex account</h1>
           <p className="mt-1.5 text-sm text-slate-600">
-            Build your digital profile and design your 85.6 × 54 mm NFC smart card.
+            Build your digital profile and design your 85.6 × 54 mm SMART business card.
           </p>
 
           {errorMsg && (

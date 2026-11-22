@@ -64,11 +64,11 @@ export const PrinterDashboardPage: React.FC = () => {
           ))}
         </div>
 
-        {/* NFC Encoding & Production Spec Sheet */}
+        {/* SMART Encoding & Production Spec Sheet */}
         <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-3">
           <div className="flex items-center gap-2 font-display font-bold text-base text-[#0B1D3A]">
             <Wifi className="h-5 w-5 text-[#1D4ED8]" />
-            <span>Printer NFC Encoding & 300 DPI Quality Checklist</span>
+            <span>Printer SMART Encoding & 300 DPI Quality Checklist</span>
           </div>
           <ul className="text-sm text-slate-600 space-y-1.5 list-disc pl-5">
             <li>Verify trim dimensions are exactly <strong>85.6 × 54.0 mm</strong> with <strong>3.0 mm bleed</strong> (91.6 × 60.0 mm PDF page).</li>
@@ -406,12 +406,12 @@ export const PrinterOrderDetailPage: React.FC = () => {
           </div>
         )}
 
-        {/* NFC Encoding Target + QR Artifact + Dispatch Form */}
+        {/* SMART Encoding Target + QR Artifact + Dispatch Form */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-3">
-            <h3 className="font-display font-bold text-sm text-[#0B1D3A]">NFC Encoding & Verified QR Target</h3>
+            <h3 className="font-display font-bold text-sm text-[#0B1D3A]">SMART Encoding & Verified QR Target</h3>
             <p className="text-xs text-slate-600">
-              Encode this exact NDEF URI onto the card&apos;s NFC chip during manufacturing:
+              Encode this exact NDEF URI onto the card&apos;s SMART chip during manufacturing:
             </p>
             <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg font-mono text-xs text-[#1D4ED8] break-all">
               {qr?.targetUrl || `${window.location.origin}/p/${order.profileSlug}`}

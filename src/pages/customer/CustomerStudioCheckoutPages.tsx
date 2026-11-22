@@ -33,11 +33,23 @@ import {
   Square,
   Circle,
   Minus,
+  ArrowUpToLine,
+  ArrowDownToLine,
+  AlignVerticalJustifyCenter,
+  Palette,
 } from 'lucide-react';
 import { PortalLayout } from '../../components/PortalLayout';
 import { CardCanvasPreview, type CardCanvasTarget } from '../../components/CardCanvasPreview';
 import { CardDesignPreviewModal } from '../../components/CardDesignPreviewModal';
+import { ColorPaletteField } from '../../components/ColorPaletteField';
 import { FulfilmentTimeline } from '../../components/FulfilmentTimeline';
+import {
+  alignTargetsOnSide,
+  computeSnapAndGuidelines,
+  isSameTarget,
+  nudgeTargetsOnSide,
+  type AlignAction,
+} from '../../lib/cardLayout';
 import {
   ProfilePhotoEditorModal,
   autoFitImageToSquareDataUrl,
@@ -101,17 +113,6 @@ const SYSTEM_FONTS = [
   { label: 'Courier New (System Mono)', value: 'Courier New, monospace' },
 ];
 
-const TEXT_COLOR_SWATCHES = [
-  '#FFFFFF',
-  '#0B1D3A',
-  '#1D4ED8',
-  '#06B6D4',
-  '#93C5FD',
-  '#334155',
-  '#F59E0B',
-  '#E11D48',
-];
-
 function cloneSide(side: CardSideDesign): CardSideDesign {
   return JSON.parse(JSON.stringify(side)) as CardSideDesign;
 }
@@ -172,7 +173,11 @@ export const CustomerCardStudioPage: React.FC = () => {
   const [orientation, setOrientation] = useState<'landscape' | 'vertical'>('landscape');
   const [frontDesign, setFrontDesign] = useState<CardSideDesign>(() => cloneSide(DEFAULT_STARTER_TEMPLATE.frontSpec));
   const [backDesign, setBackDesign] = useState<CardSideDesign>(() => cloneSide(DEFAULT_STARTER_TEMPLATE.backSpec));
-  const [selectedTarget, setSelectedTarget] = useState<CardCanvasTarget | null>(null);
+  const [selectedTargets, setSelectedTargets] = useState<CardCanvasTarget[]>([]);
+  const [guidelines, setGuidelines] = useState<{ vertical: number[]; horizontal: number[] }>({
+    vertical: [],
+    horizontal: [],
+  });
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [fieldsDropdownOpen, setFieldsDropdownOpen] = useState(false);
   const [photoCropSource, setPhotoCropSource] = useState<string | null>(null);
@@ -190,6 +195,10 @@ export const CustomerCardStudioPage: React.FC = () => {
     back: { elements: [], showAvatar: false },
   });
 
+  const selectedTarget = selectedTargets[0] || null;
+  const setSelectedTarget = (t: CardCanvasTarget | null) => {
+    setSelectedTargets(t ? [t] : []);
+  };
   const selectedElementId = selectedTarget?.kind === 'text' ? selectedTarget.id : null;
   const selectedShapeId = selectedTarget?.kind === 'shape' ? selectedTarget.id : null;
 
@@ -422,20 +431,39 @@ export const CustomerCardStudioPage: React.FC = () => {
     if (selectedShapeId === id) setSelectedTarget(null);
   };
 
-  const handleSelectTarget = (t: CardCanvasTarget | null) => {
-    setSelectedTarget(t);
+  const handleSelectTarget = (t: CardCanvasTarget | null, additive = false) => {
     if (!t) {
+      setSelectedTargets([]);
       setEditingTextId(null);
       return;
     }
     setMode('custom');
+    if (additive) {
+      setSelectedTargets((prev) => {
+        const exists = prev.some((p) => isSameTarget(p, t));
+        return exists ? prev.filter((p) => !isSameTarget(p, t)) : [...prev, t];
+      });
+    } else {
+      setSelectedTargets([t]);
+    }
     if (t.kind === 'text') setCustomizeTab('text');
     else if (t.kind === 'shape') setCustomizeTab('shapes');
     else if (t.kind === 'avatar' || t.kind === 'logo') setCustomizeTab('media');
     else if (t.kind === 'qr' || t.kind === 'nfc') setCustomizeTab('qr');
   };
 
-  const handleCanvasMove = (target: CardCanvasTarget, xPct: number, yPct: number) => {
+  const handleCanvasMove = (target: CardCanvasTarget, rawX: number, rawY: number) => {
+    const snap = computeSnapAndGuidelines({
+      side: currentSide,
+      movingTarget: target,
+      candidateX: rawX,
+      candidateY: rawY,
+      orientation,
+    });
+    const xPct = snap.snappedX;
+    const yPct = snap.snappedY;
+    setGuidelines({ vertical: snap.verticalGuides, horizontal: snap.horizontalGuides });
+
     if (target.kind === 'text') {
       setCurrentSide({
         ...currentSide,
@@ -457,6 +485,47 @@ export const CustomerCardStudioPage: React.FC = () => {
     }
   };
 
+  // Keyboard arrow key movement (normal = 1%, Ctrl/Cmd = 1 point / 0.25% precision nudge)
+  useEffect(() => {
+    if (mode !== 'custom' || selectedTargets.length === 0 || editingTextId || previewModalOpen || photoCropSource) {
+      return;
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      const targetEl = e.target as HTMLElement | null;
+      if (
+        targetEl &&
+        (targetEl.tagName === 'INPUT' ||
+          targetEl.tagName === 'TEXTAREA' ||
+          targetEl.tagName === 'SELECT' ||
+          targetEl.isContentEditable)
+      ) {
+        return;
+      }
+      const step = e.ctrlKey || e.metaKey ? 0.25 : 1;
+      let dx = 0;
+      let dy = 0;
+      if (e.key === 'ArrowLeft') dx = -step;
+      else if (e.key === 'ArrowRight') dx = step;
+      else if (e.key === 'ArrowUp') dy = -step;
+      else if (e.key === 'ArrowDown') dy = step;
+      else return;
+
+      e.preventDefault();
+      if (activeSide === 'front') {
+        setFrontDesign((prev) => nudgeTargetsOnSide(prev, selectedTargets, dx, dy));
+      } else {
+        setBackDesign((prev) => nudgeTargetsOnSide(prev, selectedTargets, dx, dy));
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [mode, selectedTargets, editingTextId, previewModalOpen, photoCropSource, activeSide]);
+
+  const handleAlignSelected = (action: AlignAction) => {
+    if (selectedTargets.length === 0) return;
+    setCurrentSide(alignTargetsOnSide(currentSide, selectedTargets, action, orientation));
+  };
+
   const handleStartBlankCard = () => {
     const blankFront = cloneSide(BLANK_CARD_TEMPLATE.frontSpec);
     const blankBack = cloneSide(BLANK_CARD_TEMPLATE.backSpec);
@@ -470,7 +539,7 @@ export const CustomerCardStudioPage: React.FC = () => {
     setEditingTextId(null);
     notify(
       'Blank card canvas ready',
-      'Upload separate Front & Back designs or add text, shapes, logos, photos, NFC & QR icons.',
+      'Upload separate Front & Back designs or add text, shapes, logos, photos, SMART & QR icons.',
       'success'
     );
   };
@@ -501,7 +570,7 @@ export const CustomerCardStudioPage: React.FC = () => {
       setEditingTextId(null);
       notify(
         `${targetSide === 'front' ? 'Front' : 'Back'} card design uploaded`,
-        `Applied to ${targetSide} side only. All text, shapes, logo, photo, NFC & QR elements remain editable.`,
+        `Applied to ${targetSide} side only. All text, shapes, logo, photo, SMART & QR elements remain editable.`,
         'success'
       );
     } catch {
@@ -1135,7 +1204,7 @@ export const CustomerCardStudioPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="py-5 px-3 sm:px-5 bg-slate-50 rounded-xl border border-slate-200">
+            <div className="py-5 px-3 sm:px-5 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
               {/* Strictly NEVER pass actualQrPng here: Pre-purchase shows placeholder ONLY */}
               <CardCanvasPreview
                 side={currentSide}
@@ -1145,15 +1214,64 @@ export const CustomerCardStudioPage: React.FC = () => {
                 interactive
                 editResolvedText
                 selectedTarget={selectedTarget}
+                selectedTargets={selectedTargets}
                 onSelectTarget={handleSelectTarget}
                 onMoveItem={handleCanvasMove}
+                onDragEnd={() => setGuidelines({ vertical: [], horizontal: [] })}
+                guidelines={guidelines}
                 editingTextId={editingTextId}
                 onStartEditText={setEditingTextId}
                 onUpdateTextValue={updateElementTextById}
               />
-              <p className="mt-3 text-center text-[11px] text-slate-500">
-                <strong>Tip:</strong> Click any element to select · <strong>Drag</strong> to move ·{' '}
-                <strong>Double-click text</strong> on the card to edit it right on the canvas.
+
+              {/* Multi-Select & Alignment Toolbar */}
+              {mode === 'custom' && selectedTargets.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white border border-slate-200 shadow-2xs">
+                  <div className="flex items-center gap-2 text-[11px] text-slate-600">
+                    <span className="font-bold text-[#0B1D3A]">
+                      {selectedTargets.length} selected
+                    </span>
+                    <span className="hidden sm:inline text-slate-400">
+                      · Shift/Ctrl+Click multi-select · Arrows move (Ctrl+Arrow 1pt)
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1">
+                    {(
+                      [
+                        { action: 'left', title: 'Align Left', icon: <AlignLeft className="h-3.5 w-3.5" /> },
+                        { action: 'center', title: 'Align Center (Horizontal)', icon: <AlignCenter className="h-3.5 w-3.5" /> },
+                        { action: 'right', title: 'Align Right', icon: <AlignRight className="h-3.5 w-3.5" /> },
+                        { action: 'top', title: 'Align Top', icon: <ArrowUpToLine className="h-3.5 w-3.5" /> },
+                        { action: 'middle', title: 'Align Middle (Vertical)', icon: <AlignVerticalJustifyCenter className="h-3.5 w-3.5" /> },
+                        { action: 'bottom', title: 'Align Bottom', icon: <ArrowDownToLine className="h-3.5 w-3.5" /> },
+                      ] as const
+                    ).map((btn) => (
+                      <button
+                        key={btn.action}
+                        type="button"
+                        onClick={() => handleAlignSelected(btn.action)}
+                        title={btn.title}
+                        className="p-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-[#1D4ED8] hover:text-white hover:border-[#1D4ED8] text-slate-700 transition-colors"
+                      >
+                        {btn.icon}
+                      </button>
+                    ))}
+                    {selectedTargets.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTarget(null)}
+                        className="ml-1 px-2 py-1 rounded-lg border border-slate-200 text-[11px] font-semibold text-slate-600 hover:bg-slate-100"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <p className="text-center text-[11px] text-slate-500">
+                <strong>Tip:</strong> Click to select (<strong>Shift/Ctrl+Click</strong> to multi-select) · <strong>Drag</strong> with snap guides ·{' '}
+                <strong>Arrow keys</strong> to move (<strong>Ctrl+Arrow</strong> for 1pt) · <strong>Double-click text</strong> to edit.
               </p>
             </div>
 
@@ -1228,13 +1346,13 @@ export const CustomerCardStudioPage: React.FC = () => {
                     />
                     <span className="text-[11px] text-slate-500">pt</span>
                   </div>
-                  <input
-                    type="color"
-                    value={selectedEl.color}
-                    onChange={(e) => updateSelectedEl({ color: e.target.value })}
-                    className="w-8 h-8 rounded border border-slate-300 cursor-pointer"
-                    title="Text color"
-                  />
+                  <div className="w-56">
+                    <ColorPaletteField
+                      compact
+                      value={selectedEl.color}
+                      onChange={(hex) => updateSelectedEl({ color: hex })}
+                    />
+                  </div>
                   <div className="flex items-center gap-1">
                     <button
                       type="button"
@@ -1345,6 +1463,26 @@ export const CustomerCardStudioPage: React.FC = () => {
                       <span>Crop</span>
                     </button>
                   )}
+                  <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(currentSide.showAvatarBorder)}
+                      onChange={(e) =>
+                        setCurrentSide({ ...currentSide, showAvatarBorder: e.target.checked })
+                      }
+                      className="h-3.5 w-3.5 accent-[#1D4ED8]"
+                    />
+                    <span>Border</span>
+                  </label>
+                  {currentSide.showAvatarBorder && (
+                    <div className="w-48">
+                      <ColorPaletteField
+                        compact
+                        value={currentSide.avatarBorderColor || '#FFFFFF'}
+                        onChange={(hex) => setCurrentSide({ ...currentSide, avatarBorderColor: hex })}
+                      />
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
@@ -1363,13 +1501,14 @@ export const CustomerCardStudioPage: React.FC = () => {
                   Selected Shape ({selectedShape.kind})
                 </span>
                 <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    type="color"
-                    value={selectedShape.color === 'transparent' ? '#FFFFFF' : selectedShape.color}
-                    onChange={(e) => updateSelectedShape({ color: e.target.value, gradientTo: '' })}
-                    className="w-8 h-7 rounded border border-slate-300 cursor-pointer"
-                    title="Shape color"
-                  />
+                  <div className="w-52">
+                    <ColorPaletteField
+                      compact
+                      allowTransparent
+                      value={selectedShape.color}
+                      onChange={(hex) => updateSelectedShape({ color: hex, gradientTo: '' })}
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() => setCustomizeTab('shapes')}
@@ -1444,7 +1583,7 @@ export const CustomerCardStudioPage: React.FC = () => {
             ) : selectedTarget?.kind === 'nfc' ? (
               <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3.5 flex flex-wrap items-center justify-between gap-3">
                 <span className="text-xs font-bold text-[#0B1D3A]">
-                  Selected: NFC Wave Icon ({currentSide.nfcSizeMm || 6} mm)
+                  Selected: SMART Wave Icon ({currentSide.nfcSizeMm || 6} mm)
                 </span>
                 <div className="flex flex-wrap items-center gap-2">
                   <input
@@ -1456,13 +1595,13 @@ export const CustomerCardStudioPage: React.FC = () => {
                     onChange={(e) => setCurrentSide({ ...currentSide, nfcSizeMm: Number(e.target.value) })}
                     className="w-28"
                   />
-                  <input
-                    type="color"
-                    value={currentSide.nfcIconColor || '#38BDF8'}
-                    onChange={(e) => setCurrentSide({ ...currentSide, nfcIconColor: e.target.value })}
-                    className="w-7 h-7 rounded border border-slate-300 cursor-pointer"
-                    title="NFC Icon Color"
-                  />
+                  <div className="w-48">
+                    <ColorPaletteField
+                      compact
+                      value={currentSide.nfcIconColor || '#38BDF8'}
+                      onChange={(hex) => setCurrentSide({ ...currentSide, nfcIconColor: hex })}
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() => {
@@ -1471,7 +1610,7 @@ export const CustomerCardStudioPage: React.FC = () => {
                     }}
                     className="px-2.5 py-1.5 rounded-lg border border-rose-200 bg-white text-xs font-semibold text-rose-600"
                   >
-                    Hide NFC Icon
+                    Hide SMART Icon
                   </button>
                 </div>
               </div>
@@ -1586,7 +1725,7 @@ export const CustomerCardStudioPage: React.FC = () => {
                   </div>
                 </div>
                 <p className="text-xs text-slate-500">
-                  Switch to <strong>2. Customize Card</strong> or click/drag any element on the preview to adjust text, shapes, photos, logo, NFC icon, or QR position.
+                  Switch to <strong>2. Customize Card</strong> or click/drag any element on the preview to adjust text, shapes, photos, logo, SMART icon, or QR position.
                 </p>
               </div>
             ) : (
@@ -1613,7 +1752,7 @@ export const CustomerCardStudioPage: React.FC = () => {
                       { id: 'shapes', label: 'Shapes' },
                       { id: 'background', label: 'Front / Back' },
                       { id: 'media', label: 'Photo / Logo' },
-                      { id: 'qr', label: 'QR & NFC' },
+                      { id: 'qr', label: 'QR & SMART' },
                     ] as const
                   ).map((t) => (
                     <button
@@ -1631,13 +1770,13 @@ export const CustomerCardStudioPage: React.FC = () => {
 
                 {customizeTab === 'text' && (
                   <div className="space-y-3.5">
-                    {/* Clickable Layer Chips for Every Text Item on Current Side */}
+                    {/* Clickable Layer Chips for Every Text Item on Current Side (Supports Shift/Ctrl Multi-Select) */}
                     <div className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-semibold text-slate-600">
                           Elements on {activeSide === 'front' ? 'Front' : 'Back'} ({currentSide.elements.length})
                         </span>
-                        <span className="text-[11px] text-slate-400">Click to select · Double-click to edit</span>
+                        <span className="text-[11px] text-slate-400">Shift/Ctrl+Click multi-select</span>
                       </div>
                       {currentSide.elements.length === 0 ? (
                         <p className="text-xs text-slate-500">
@@ -1646,12 +1785,14 @@ export const CustomerCardStudioPage: React.FC = () => {
                       ) : (
                         <div className="flex flex-wrap gap-1.5">
                           {currentSide.elements.map((el) => {
-                            const active = el.id === selectedElementId;
+                            const active = selectedTargets.some((t) => t.kind === 'text' && t.id === el.id);
                             return (
                               <button
                                 key={el.id}
                                 type="button"
-                                onClick={() => setSelectedTarget({ kind: 'text', id: el.id })}
+                                onClick={(e) =>
+                                  handleSelectTarget({ kind: 'text', id: el.id }, e.shiftKey || e.ctrlKey || e.metaKey)
+                                }
                                 onDoubleClick={() => {
                                   setSelectedTarget({ kind: 'text', id: el.id });
                                   setEditingTextId(el.id);
@@ -1842,37 +1983,12 @@ export const CustomerCardStudioPage: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Text Color Picker & Swatches */}
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between">
-                            <label className="text-[11px] font-medium text-slate-600">Text Color</label>
-                            <span className="font-mono text-[11px] text-slate-500 uppercase">{selectedEl.color}</span>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <input
-                              type="color"
-                              value={selectedEl.color}
-                              onChange={(e) => updateSelectedEl({ color: e.target.value })}
-                              className="w-8 h-7 rounded border border-slate-300 cursor-pointer shrink-0"
-                              title="Pick custom text color"
-                            />
-                            {TEXT_COLOR_SWATCHES.map((hex) => (
-                              <button
-                                key={hex}
-                                type="button"
-                                onClick={() => updateSelectedEl({ color: hex })}
-                                style={{ backgroundColor: hex }}
-                                className={`w-6 h-6 rounded-full border transition-transform ${
-                                  selectedEl.color.toLowerCase() === hex.toLowerCase()
-                                    ? 'ring-2 ring-[#1D4ED8] ring-offset-1 border-slate-400 scale-110'
-                                    : 'border-slate-300 hover:scale-105'
-                                }`}
-                                title={`Use color ${hex}`}
-                                aria-label={`Text color ${hex}`}
-                              />
-                            ))}
-                          </div>
-                        </div>
+                        {/* Text Color Picker, Hex Paste & Saved Palette */}
+                        <ColorPaletteField
+                          label="Text Color (Picker, Hex Paste & Recent Palette)"
+                          value={selectedEl.color}
+                          onChange={(hex) => updateSelectedEl({ color: hex })}
+                        />
 
                         <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-200">
                           <div>
@@ -2034,12 +2150,14 @@ export const CustomerCardStudioPage: React.FC = () => {
                       ) : (
                         <div className="flex flex-wrap gap-1.5">
                           {(currentSide.shapes || []).map((shp, idx) => {
-                            const active = shp.id === selectedShapeId;
+                            const active = selectedTargets.some((t) => t.kind === 'shape' && t.id === shp.id);
                             return (
                               <button
                                 key={shp.id}
                                 type="button"
-                                onClick={() => setSelectedTarget({ kind: 'shape', id: shp.id })}
+                                onClick={(e) =>
+                                  handleSelectTarget({ kind: 'shape', id: shp.id }, e.shiftKey || e.ctrlKey || e.metaKey)
+                                }
                                 className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border ${
                                   active
                                     ? 'bg-[#0B1D3A] text-white border-[#0B1D3A]'
@@ -2101,25 +2219,13 @@ export const CustomerCardStudioPage: React.FC = () => {
                             </select>
                           </div>
                           <div>
-                            <label className="block text-[11px] text-slate-600 mb-1">Fill &amp; Transparent</label>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="color"
-                                value={selectedShape.color === 'transparent' ? '#FFFFFF' : selectedShape.color}
-                                onChange={(e) => updateSelectedShape({ color: e.target.value })}
-                                className="w-8 h-7 rounded border border-slate-300 cursor-pointer"
-                              />
-                              <label className="inline-flex items-center gap-1 text-[11px] text-slate-600 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedShape.color === 'transparent'}
-                                  onChange={(e) =>
-                                    updateSelectedShape({ color: e.target.checked ? 'transparent' : '#D4AF37' })
-                                  }
-                                />
-                                <span>Outline Only</span>
-                              </label>
-                            </div>
+                            <ColorPaletteField
+                              label="Shape Fill / Outline Only"
+                              compact
+                              allowTransparent
+                              value={selectedShape.color}
+                              onChange={(hex) => updateSelectedShape({ color: hex, gradientTo: '' })}
+                            />
                           </div>
                         </div>
 
@@ -2189,7 +2295,7 @@ export const CustomerCardStudioPage: React.FC = () => {
                             <label className="block text-[11px] text-slate-600">
                               Border Width: {selectedShape.borderWidthPx || 0}px
                             </label>
-                            <div className="flex items-center gap-2">
+                            <div className="space-y-1.5">
                               <input
                                 type="range"
                                 min={0}
@@ -2198,12 +2304,10 @@ export const CustomerCardStudioPage: React.FC = () => {
                                 onChange={(e) => updateSelectedShape({ borderWidthPx: Number(e.target.value) })}
                                 className="w-full"
                               />
-                              <input
-                                type="color"
+                              <ColorPaletteField
+                                compact
                                 value={selectedShape.borderColor || '#FFFFFF'}
-                                onChange={(e) => updateSelectedShape({ borderColor: e.target.value })}
-                                className="w-7 h-6 rounded border border-slate-300 shrink-0"
-                                title="Border color"
+                                onChange={(hex) => updateSelectedShape({ borderColor: hex })}
                               />
                             </div>
                           </div>
@@ -2222,7 +2326,7 @@ export const CustomerCardStudioPage: React.FC = () => {
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5 text-xs font-semibold text-[#0B1D3A]">
                         <ImageIcon className="h-3.5 w-3.5 text-[#1D4ED8]" />
-                        <span>Separate Front &amp; Back Card Uploads / Backgrounds</span>
+                        <span>Separate Front &amp; Back Backgrounds &amp; Card Borders</span>
                       </div>
                       <span
                         title="Recommended size: 1082 × 709 px (Landscape) or 709 × 1082 px (Vertical) at 300 DPI, max 5 MB."
@@ -2233,32 +2337,29 @@ export const CustomerCardStudioPage: React.FC = () => {
                       </span>
                     </div>
 
-                    {/* Front Card Design / Background Box */}
+                    {/* Front Card Design / Background & Border Box */}
                     <div
-                      className={`p-3.5 rounded-xl border space-y-2.5 ${
+                      className={`p-3.5 rounded-xl border space-y-3 ${
                         activeSide === 'front' ? 'border-[#1D4ED8] bg-blue-50/40' : 'border-slate-200 bg-slate-50/60'
                       }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-[#0B1D3A]">Front Card Background / Design</span>
+                        <span className="text-xs font-bold text-[#0B1D3A]">Front Card Background &amp; Border</span>
                         {frontDesign.backgroundImageUrl && (
                           <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
                             Image Uploaded
                           </span>
                         )}
                       </div>
+                      <ColorPaletteField
+                        label="Front Background Color"
+                        compact
+                        value={frontDesign.backgroundColor}
+                        onChange={(hex) =>
+                          setFrontDesign((prev) => ({ ...prev, backgroundColor: hex, gradientTo: '' }))
+                        }
+                      />
                       <div className="flex flex-wrap items-center gap-2">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[11px] text-slate-600">Color:</span>
-                          <input
-                            type="color"
-                            value={frontDesign.backgroundColor}
-                            onChange={(e) =>
-                              setFrontDesign((prev) => ({ ...prev, backgroundColor: e.target.value, gradientTo: '' }))
-                            }
-                            className="w-8 h-7 rounded border border-slate-300 cursor-pointer"
-                          />
-                        </div>
                         <label className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-[#1D4ED8] bg-white text-[#1D4ED8] rounded-lg text-xs font-semibold cursor-pointer hover:bg-blue-50">
                           <Upload className="h-3.5 w-3.5" />
                           <span>{frontDesign.backgroundImageUrl ? 'Replace Front Image' : 'Upload Front Image'}</span>
@@ -2280,34 +2381,77 @@ export const CustomerCardStudioPage: React.FC = () => {
                           </button>
                         )}
                       </div>
+                      <div className="pt-2 border-t border-slate-200/80 space-y-2">
+                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(frontDesign.showBorder)}
+                            onChange={(e) =>
+                              setFrontDesign((prev) => ({
+                                ...prev,
+                                showBorder: e.target.checked,
+                                borderColor: prev.borderColor || '#D4AF37',
+                                borderWidthPx: prev.borderWidthPx || 2,
+                              }))
+                            }
+                            className="h-4 w-4 accent-[#1D4ED8]"
+                          />
+                          <Palette className="h-3.5 w-3.5 text-[#1D4ED8]" />
+                          <span>Show Card Outer Border (Front)</span>
+                        </label>
+                        {frontDesign.showBorder && (
+                          <div className="space-y-2 pl-1">
+                            <ColorPaletteField
+                              label="Front Border Color"
+                              compact
+                              value={frontDesign.borderColor || '#D4AF37'}
+                              onChange={(hex) =>
+                                setFrontDesign((prev) => ({ ...prev, borderColor: hex }))
+                              }
+                            />
+                            <div>
+                              <label className="block text-[11px] text-slate-600">
+                                Border Thickness: {frontDesign.borderWidthPx || 2} px
+                              </label>
+                              <input
+                                type="range"
+                                min={1}
+                                max={6}
+                                value={frontDesign.borderWidthPx || 2}
+                                onChange={(e) =>
+                                  setFrontDesign((prev) => ({ ...prev, borderWidthPx: Number(e.target.value) }))
+                                }
+                                className="w-full"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
-                    {/* Back Card Design / Background Box */}
+                    {/* Back Card Design / Background & Border Box */}
                     <div
-                      className={`p-3.5 rounded-xl border space-y-2.5 ${
+                      className={`p-3.5 rounded-xl border space-y-3 ${
                         activeSide === 'back' ? 'border-emerald-600 bg-emerald-50/40' : 'border-slate-200 bg-slate-50/60'
                       }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-[#0B1D3A]">Back Card Background / Design</span>
+                        <span className="text-xs font-bold text-[#0B1D3A]">Back Card Background &amp; Border</span>
                         {backDesign.backgroundImageUrl && (
                           <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
                             Image Uploaded
                           </span>
                         )}
                       </div>
+                      <ColorPaletteField
+                        label="Back Background Color"
+                        compact
+                        value={backDesign.backgroundColor}
+                        onChange={(hex) =>
+                          setBackDesign((prev) => ({ ...prev, backgroundColor: hex, gradientTo: '' }))
+                        }
+                      />
                       <div className="flex flex-wrap items-center gap-2">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[11px] text-slate-600">Color:</span>
-                          <input
-                            type="color"
-                            value={backDesign.backgroundColor}
-                            onChange={(e) =>
-                              setBackDesign((prev) => ({ ...prev, backgroundColor: e.target.value, gradientTo: '' }))
-                            }
-                            className="w-8 h-7 rounded border border-slate-300 cursor-pointer"
-                          />
-                        </div>
                         <label className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-emerald-600 bg-white text-emerald-700 rounded-lg text-xs font-semibold cursor-pointer hover:bg-emerald-50">
                           <Upload className="h-3.5 w-3.5" />
                           <span>{backDesign.backgroundImageUrl ? 'Replace Back Image' : 'Upload Back Image'}</span>
@@ -2327,6 +2471,52 @@ export const CustomerCardStudioPage: React.FC = () => {
                             <Trash2 className="h-3.5 w-3.5" />
                             <span>Remove</span>
                           </button>
+                        )}
+                      </div>
+                      <div className="pt-2 border-t border-slate-200/80 space-y-2">
+                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(backDesign.showBorder)}
+                            onChange={(e) =>
+                              setBackDesign((prev) => ({
+                                ...prev,
+                                showBorder: e.target.checked,
+                                borderColor: prev.borderColor || '#D4AF37',
+                                borderWidthPx: prev.borderWidthPx || 2,
+                              }))
+                            }
+                            className="h-4 w-4 accent-emerald-600"
+                          />
+                          <Palette className="h-3.5 w-3.5 text-emerald-700" />
+                          <span>Show Card Outer Border (Back)</span>
+                        </label>
+                        {backDesign.showBorder && (
+                          <div className="space-y-2 pl-1">
+                            <ColorPaletteField
+                              label="Back Border Color"
+                              compact
+                              value={backDesign.borderColor || '#D4AF37'}
+                              onChange={(hex) =>
+                                setBackDesign((prev) => ({ ...prev, borderColor: hex }))
+                              }
+                            />
+                            <div>
+                              <label className="block text-[11px] text-slate-600">
+                                Border Thickness: {backDesign.borderWidthPx || 2} px
+                              </label>
+                              <input
+                                type="range"
+                                min={1}
+                                max={6}
+                                value={backDesign.borderWidthPx || 2}
+                                onChange={(e) =>
+                                  setBackDesign((prev) => ({ ...prev, borderWidthPx: Number(e.target.value) }))
+                                }
+                                className="w-full"
+                              />
+                            </div>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -2386,23 +2576,48 @@ export const CustomerCardStudioPage: React.FC = () => {
                     </div>
 
                     {currentSide.showAvatar && (
-                      <div className="flex flex-wrap items-center gap-2 pt-1">
-                        <span className="text-[11px] font-medium text-slate-600">Photo Frame Shape:</span>
-                        <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg p-0.5">
-                          {(['circle', 'rounded', 'square'] as const).map((shp) => (
-                            <button
-                              key={shp}
-                              type="button"
-                              onClick={() => setCurrentSide({ ...currentSide, avatarShape: shp })}
-                              className={`px-2.5 py-1 rounded text-[11px] font-semibold capitalize ${
-                                (currentSide.avatarShape || 'circle') === shp
-                                  ? 'bg-[#0B1D3A] text-white'
-                                  : 'text-slate-600 hover:bg-slate-100'
-                              }`}
-                            >
-                              {shp}
-                            </button>
-                          ))}
+                      <div className="space-y-2.5 pt-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[11px] font-medium text-slate-600">Photo Frame Shape:</span>
+                          <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg p-0.5">
+                            {(['circle', 'rounded', 'square'] as const).map((shp) => (
+                              <button
+                                key={shp}
+                                type="button"
+                                onClick={() => setCurrentSide({ ...currentSide, avatarShape: shp })}
+                                className={`px-2.5 py-1 rounded text-[11px] font-semibold capitalize ${
+                                  (currentSide.avatarShape || 'circle') === shp
+                                    ? 'bg-[#0B1D3A] text-white'
+                                    : 'text-slate-600 hover:bg-slate-100'
+                                }`}
+                              >
+                                {shp}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="space-y-1.5 pt-1 border-t border-slate-200/70">
+                          <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(currentSide.showAvatarBorder)}
+                              onChange={(e) =>
+                                setCurrentSide({ ...currentSide, showAvatarBorder: e.target.checked })
+                              }
+                              className="h-3.5 w-3.5 accent-[#1D4ED8]"
+                            />
+                            <span>Show Photo Frame Border (Uncheck for borderless transparent PNGs)</span>
+                          </label>
+                          {currentSide.showAvatarBorder && (
+                            <ColorPaletteField
+                              label="Photo Border Color"
+                              compact
+                              value={currentSide.avatarBorderColor || '#FFFFFF'}
+                              onChange={(hex) =>
+                                setCurrentSide({ ...currentSide, avatarBorderColor: hex })
+                              }
+                            />
+                          )}
                         </div>
                       </div>
                     )}
@@ -2535,9 +2750,9 @@ export const CustomerCardStudioPage: React.FC = () => {
                       )}
                     </div>
 
-                    {/* NFC Symbol Settings (Full Position & Size Control) */}
+                    {/* SMART Symbol Settings (Full Position & Size Control) */}
                     <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 space-y-2.5">
-                      <div className="flex items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
                         <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#0B1D3A] cursor-pointer">
                           <input
                             type="checkbox"
@@ -2545,20 +2760,17 @@ export const CustomerCardStudioPage: React.FC = () => {
                             onChange={(e) => setCurrentSide({ ...currentSide, showNfcIcon: e.target.checked })}
                           />
                           <Wifi className="h-3.5 w-3.5 text-[#1D4ED8] rotate-90" />
-                          <span>Show NFC Wave Icon (Draggable)</span>
+                          <span>Show SMART Wave Icon (Draggable)</span>
                         </label>
-                        {currentSide.showNfcIcon && (
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[11px] text-slate-500">Color:</span>
-                            <input
-                              type="color"
-                              value={currentSide.nfcIconColor || '#38BDF8'}
-                              onChange={(e) => setCurrentSide({ ...currentSide, nfcIconColor: e.target.value })}
-                              className="w-8 h-7 rounded border border-slate-300 cursor-pointer"
-                            />
-                          </div>
-                        )}
                       </div>
+                      {currentSide.showNfcIcon && (
+                        <ColorPaletteField
+                          label="SMART Wave Icon Color"
+                          compact
+                          value={currentSide.nfcIconColor || '#38BDF8'}
+                          onChange={(hex) => setCurrentSide({ ...currentSide, nfcIconColor: hex })}
+                        />
+                      )}
                       {currentSide.showNfcIcon && (
                         <div className="grid grid-cols-3 gap-2">
                           <div>
@@ -2957,7 +3169,7 @@ export const CustomerCheckoutPage: React.FC = () => {
             amount: gwOrder.amountPaise,
             currency: gwOrder.currency || 'INR',
             name: 'TapNex',
-            description: `TapNex Smart NFC Card Order ${orderNumber}`,
+            description: `TapNex Smart Card Order ${orderNumber}`,
             order_id: gwOrder.gatewayOrderId,
             prefill: {
               name: shipping.fullName,
@@ -3812,7 +4024,7 @@ export const CustomerSupportPage: React.FC = () => {
             >
               <option value="Order">Order Status</option>
               <option value="Design Revision">Post-Purchase Design Revision</option>
-              <option value="NFC Help">NFC Compatibility & Tap Help</option>
+              <option value="SMART Help">SMART Compatibility &amp; Tap Help</option>
               <option value="Billing">Payment & Billing</option>
               <option value="General">General Inquiry</option>
             </select>

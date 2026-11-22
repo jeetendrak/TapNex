@@ -179,7 +179,7 @@ export const PublicLayout: React.FC<{ children: React.ReactNode }> = ({ children
         </div>
         <div className="border-t border-slate-800/80 py-5 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
           <span>© {new Date().getFullYear()} TapNex Smart Identity Systems. All rights reserved.</span>
-          <span>ISO/IEC 7810 ID-1 (85.6 × 54 mm) · NFC + QR Hybrid Standard</span>
+          <span>Tap &amp; QR Hybrid SMART Business Cards</span>
         </div>
       </footer>
     </div>

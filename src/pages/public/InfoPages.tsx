@@ -30,9 +30,9 @@ export const HowItWorksPage: React.FC = () => (
         {[
           { step: 'Step 1', title: 'Create your digital business profile', text: 'Register with Google or email/password, verify your account, and enter your contact numbers, WhatsApp, bio, and 16+ social platforms. Toggle visibility per field.' },
           { step: 'Step 2', title: 'Customize your business card', text: 'Use an 85.6 × 54 mm predefined template or design your own front and back layout. A placeholder indicates exact QR placement prior to purchase.' },
-          { step: 'Step 3', title: 'Purchase your NFC card', text: 'Approve your final layout, provide your Indian shipping address, and complete payment securely via Razorpay.' },
-          { step: 'Step 4', title: 'Production, QR embedding & NFC encoding', text: 'After payment verification, our backend generates your unique QR code, exports a 300 DPI print-ready PDF with 3 mm bleed, and assigns a verified print partner to encode and ship your card within 10–15 days.' },
-          { step: 'Step 5', title: 'Share via NFC tap or QR scan', text: 'Compatible smartphones read your profile URL from the embedded NFC chip, while any camera can scan the fallback QR code.' },
+          { step: 'Step 3', title: 'Purchase your SMART card', text: 'Approve your final layout, provide your Indian shipping address, and complete payment securely via Razorpay or enabled gateways.' },
+          { step: 'Step 4', title: 'Production, QR embedding & SMART encoding', text: 'After payment verification, our backend generates your unique QR code, exports a 300 DPI print-ready PDF with 3 mm bleed, and assigns a verified print partner to encode and ship your card within 10–15 days.' },
+          { step: 'Step 5', title: 'Share via SMART tap or QR scan', text: 'Compatible smartphones read your profile URL from the embedded SMART chip, while any camera can scan the fallback QR code.' },
         ].map((s) => (
           <div key={s.step} className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col sm:flex-row gap-4">
             <span className="font-mono text-sm font-bold text-[#1D4ED8] shrink-0 w-20">{s.step}</span>
@@ -64,8 +64,8 @@ export const FeaturesPage: React.FC = () => (
       </p>
       <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-6">
         {[
-          { title: 'One-Tap NFC Sharing', desc: 'Encoded NTAG215 URL resolves immediately on NFC-capable iOS and Android devices.' },
-          { title: 'Universal QR Fallback', desc: 'High-contrast, error-correction-H QR code printed cleanly for devices without NFC.' },
+          { title: 'One-Tap SMART Sharing', desc: 'Encoded NTAG215 SMART chip URL resolves immediately on tap-capable iOS and Android devices.' },
+          { title: 'Universal QR Fallback', desc: 'High-contrast, error-correction-H QR code printed cleanly for devices without tap hardware.' },
           { title: 'One-Click vCard (.vcf)', desc: 'Generates standard vCard 3.0 downloads containing only your publicly visible fields.' },
           { title: 'Field-by-Field Privacy', desc: 'Independently show or hide mobile, alternate email, address, social links, and custom fields.' },
           { title: '300 DPI Print Studio', desc: 'Exact 85.6 × 54 mm trim size, 3 mm bleed, safe margins, and crop marks.' },
@@ -144,8 +144,8 @@ export const PricingPage: React.FC = () => (
       </p>
       <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-6">
         {[
-          { tier: 'Minimal Ceramic PVC', price: '₹1,200', desc: 'Crisp matte white or dual-tone PVC NFC card.', items: ['85.6 × 54 mm trim', '18% GST & ₹99 shipping at checkout', 'Instant vCard download'] },
-          { tier: 'Signature Executive Navy', price: '₹1,350', desc: 'Our flagship matte/gloss PVC NFC business card (₹1,200 – ₹1,500 range).', items: ['Custom front & back layout', 'Field-level privacy toggles', 'Priority print partner routing'] },
+          { tier: 'Minimal Ceramic PVC', price: '₹1,200', desc: 'Crisp matte white or dual-tone PVC SMART card.', items: ['85.6 × 54 mm trim', '18% GST & ₹99 shipping at checkout', 'Instant vCard download'] },
+          { tier: 'Signature Executive Navy', price: '₹1,350', desc: 'Our flagship matte/gloss PVC SMART business card (₹1,200 – ₹1,500 range).', items: ['Custom front & back layout', 'Field-level privacy toggles', 'Priority print partner routing'] },
           { tier: 'Luxury Dark Metal Hybrid', price: '₹2,000 – ₹2,500', desc: 'Brushed obsidian metal hybrid finish for executive leadership.', items: ['Heavyweight hybrid core', 'Dedicated design verification', 'Pan-India tracked dispatch'] },
         ].map((p) => (
           <div key={p.tier} className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between">
@@ -178,7 +178,7 @@ export const FaqPage: React.FC = () => (
       <h1 className="font-display text-3xl font-bold text-[#0B1D3A]">Frequently Asked Questions</h1>
       <div className="mt-8 space-y-4">
         {[
-          { q: 'Does every smartphone support NFC tapping?', a: 'Most modern iPhones (XS and newer) and Android phones with NFC enabled support tap-to-open. For older or NFC-disabled phones, the printed QR code provides universal access.' },
+          { q: 'Does every smartphone support SMART tapping?', a: 'Most modern iPhones (XS and newer) and Android phones with contactless tap enabled support tap-to-open. For older or tap-disabled phones, the printed QR code provides universal access.' },
           { q: 'Can I customize my public profile URL?', a: 'Yes, you can choose any available slug such as /p/your-name from your Customer Portal.' },
           { q: 'Can I edit my card design after payment?', a: 'Once payment is verified, your design is locked for printing accuracy. If you need post-purchase changes, submit a Design Revision ticket in Help & Support.' },
           { q: 'What is the delivery timeline?', a: 'Standard delivery across India takes 10–15 days from payment verification.' },
@@ -199,7 +199,7 @@ export const NfcGuidePage: React.FC = () => (
       <div>
         <h1 className="font-display text-3xl font-bold text-[#0B1D3A]">Smartcard Compatibility & Testing Guide</h1>
         <p className="mt-2 text-slate-600">
-          Understanding how NFC tap and QR fallback work across iPhone and Android devices.
+          Understanding how SMART tap and QR fallback work across iPhone and Android devices.
         </p>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -207,14 +207,14 @@ export const NfcGuidePage: React.FC = () => (
           <Smartphone className="h-6 w-6 text-[#1D4ED8] mb-3" />
           <h2 className="font-display font-bold text-[#0B1D3A]">Apple iPhone</h2>
           <p className="mt-2 text-sm text-slate-600 leading-relaxed">
-            iPhone XS / XR and newer support background NFC reading automatically—tap the card near the top edge of the phone. Older iPhones can scan the fallback QR code with the native Camera app.
+            iPhone XS / XR and newer support background SMART card reading automatically—tap the card near the top edge of the phone. Older iPhones can scan the fallback QR code with the native Camera app.
           </p>
         </div>
         <div className="bg-white border border-slate-200 rounded-xl p-6">
           <Shield className="h-6 w-6 text-[#1D4ED8] mb-3" />
           <h2 className="font-display font-bold text-[#0B1D3A]">Android Smartphones</h2>
           <p className="mt-2 text-sm text-slate-600 leading-relaxed">
-            Ensure NFC is turned on in Settings → Connected Devices. Hold the card steady against the upper-middle back of the phone. If NFC is unavailable or disabled on a device, use the QR code fallback.
+            Ensure contactless tap / SMART reading is turned on in Settings → Connected Devices. Hold the card steady against the upper-middle back of the phone. If tap reading is unavailable or disabled on a device, use the QR code fallback.
           </p>
         </div>
       </div>
@@ -321,7 +321,7 @@ export const LegalDocPage: React.FC<{ type: 'privacy' | 'terms' | 'refund' }> = 
           )}
           {type === 'refund' && (
             <>
-              <p>Orders may be cancelled for a full refund before printer production starts. Customized NFC cards already printed or dispatched cannot be cancelled unless damaged or defective upon delivery.</p>
+              <p>Orders may be cancelled for a full refund before printer production starts. Customized SMART cards already printed or dispatched cannot be cancelled unless damaged or defective upon delivery.</p>
               <p className="flex items-center gap-2 font-medium text-slate-800">
                 <Truck className="h-4 w-4 text-[#1D4ED8]" />
                 <span>Standard delivery across India takes 10–15 days from payment verification.</span>

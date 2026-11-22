@@ -23,9 +23,11 @@ import {
   maskPhone,
 } from '../../lib/firestoreService';
 import { downloadVCard } from '../../lib/vcard';
+import { sanitizeRichBioHtml } from '../../lib/richText';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { TAPNEX_PUBLIC_BADGE_LOGO_URL } from '../../components/PublicLayout';
+import { ScreenProtectionShield } from '../../components/ScreenProtectionShield';
 import type { PublicProfileRecord } from '../../types';
 
 export const PublicProfilePage: React.FC = () => {
@@ -90,13 +92,12 @@ export const PublicProfilePage: React.FC = () => {
     };
   }, [profile, userRecord]);
 
+  const isOwnerViewer = Boolean(userRecord && profile && userRecord.uid === profile.uid);
   const isPrivilegedViewer = userRecord?.role === 'ADMIN' || userRecord?.role === 'SUPERADMIN';
-  const isPaidLive = Boolean(
-    profile?.paymentConfirmed ||
-      profile?.adminApproved ||
-      ownerPaidConfirmed ||
-      isPrivilegedViewer
+  const isPaymentUnlocked = Boolean(
+    profile?.paymentConfirmed || profile?.adminApproved || ownerPaidConfirmed
   );
+  const isPaidLive = Boolean(isPaymentUnlocked || isPrivilegedViewer);
 
   const handleCopyUrl = async () => {
     if (!isPaidLive) return;
@@ -132,18 +133,41 @@ export const PublicProfilePage: React.FC = () => {
     );
   }
 
-  if (!profile || (!profile.isPublic && !isPrivilegedViewer)) {
+  if (!profile || ((!profile.isPublic || profile.adminDisabled) && !isPrivilegedViewer)) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
         <div className="w-full max-w-md bg-white rounded-3xl p-8 text-center border border-slate-200 shadow-xs">
           <AlertCircle className="h-10 w-10 text-slate-400 mx-auto mb-3" />
           <h1 className="font-display text-xl font-bold text-[#0B1D3A]">Profile Unavailable</h1>
           <p className="mt-2 text-sm text-slate-600 leading-relaxed">
-            {profile?.unavailableMessage || inactiveFallback}
+            {profile?.adminDisabled
+              ? 'This digital profile link has been disabled by an administrator.'
+              : profile?.unavailableMessage || inactiveFallback}
           </p>
           <Link
             to="/"
             className="mt-6 inline-block px-5 py-2.5 bg-[#0B1D3A] text-white rounded-xl text-sm font-semibold"
+          >
+            Visit TapNex
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // Unpaid profile URLs are not publicly accessible unless payment is confirmed or admin-approved
+  if (!isPaymentUnlocked && !isOwnerViewer && !isPrivilegedViewer) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-white rounded-3xl p-8 text-center border border-amber-200 shadow-xs space-y-3">
+          <Lock className="h-10 w-10 text-amber-500 mx-auto" />
+          <h1 className="font-display text-xl font-bold text-[#0B1D3A]">Profile Link Pending Activation</h1>
+          <p className="text-sm text-slate-600 leading-relaxed">
+            This public digital card link is watermarked and locked until payment is confirmed or approved by an administrator.
+          </p>
+          <Link
+            to="/"
+            className="mt-4 inline-block px-5 py-2.5 bg-[#0B1D3A] text-white rounded-xl text-sm font-semibold"
           >
             Visit TapNex
           </Link>
@@ -160,9 +184,11 @@ export const PublicProfilePage: React.FC = () => {
   const displayedAltEmail = isPaidLive ? info.alternateEmail : maskEmail(info.alternateEmail);
   const displayedWebsite = isPaidLive ? info.website : info.website ? '•••••.••' : '';
   const whatsappNumber = isPaidLive ? (info.whatsapp || info.mobile || '').replace(/[^0-9]/g, '') : '';
+  const hasWhatsappItem = Boolean(displayedWhatsapp);
   const addressParts = [info.businessAddress, info.city, info.state, info.pinCode, info.country].filter(Boolean);
 
   return (
+    <ScreenProtectionShield active watermarkLabel={`TAPNEX PROTECTED · /p/${profile.slug}`}>
     <div className="min-h-screen bg-slate-100 py-6 sm:py-12 px-4">
       <div
         className={`relative max-w-lg mx-auto bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm ${
@@ -243,7 +269,7 @@ export const PublicProfilePage: React.FC = () => {
                 src={info.photoDataUrl}
                 alt={info.fullName || profile.slug}
                 referrerPolicy="no-referrer"
-                className="w-24 h-24 rounded-full object-cover border-4 border-white shadow-md bg-slate-200"
+                className="w-24 h-24 rounded-full object-cover border-4 border-white shadow-md bg-transparent"
               />
             ) : (
               <div className="w-24 h-24 rounded-full border-4 border-white shadow-md bg-[#1D4ED8] text-white flex items-center justify-center font-display text-2xl font-bold">
@@ -263,7 +289,10 @@ export const PublicProfilePage: React.FC = () => {
               <p className="mt-0.5 text-xs text-slate-500">{info.businessCategory}</p>
             )}
             {info.shortBio && (
-              <p className="mt-3 text-sm text-slate-600 leading-relaxed max-w-md">{info.shortBio}</p>
+              <div
+                className="mt-3 text-sm text-slate-600 leading-relaxed max-w-md w-full [&_p]:my-1"
+                dangerouslySetInnerHTML={{ __html: sanitizeRichBioHtml(info.shortBio) }}
+              />
             )}
           </div>
 
@@ -283,27 +312,15 @@ export const PublicProfilePage: React.FC = () => {
               <span>Save Contact</span>
             </button>
 
-            {whatsappNumber ? (
-              <a
-                href={`https://wa.me/${whatsappNumber}?text=${encodeURIComponent(`Hi ${info.fullName || ''}, connecting via your TapNex smart card.`)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors min-h-[48px]"
-              >
-                <MessageCircle className="h-4 w-4" />
-                <span>WhatsApp</span>
-              </a>
-            ) : (
-              <button
-                type="button"
-                disabled={!isPaidLive}
-                onClick={handleCopyUrl}
-                className="flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-800 text-sm font-semibold min-h-[48px] disabled:opacity-45 disabled:cursor-not-allowed"
-              >
-                {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
-                <span>{isPaidLive ? (copied ? 'Link Copied' : 'Copy Profile URL') : 'URL Locked Until Payment'}</span>
-              </button>
-            )}
+            <button
+              type="button"
+              disabled={!isPaidLive}
+              onClick={handleCopyUrl}
+              className="flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-800 text-sm font-semibold min-h-[48px] disabled:opacity-45 disabled:cursor-not-allowed"
+            >
+              {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+              <span>{isPaidLive ? (copied ? 'Link Copied' : 'Copy Profile URL') : 'URL Locked Until Payment'}</span>
+            </button>
           </div>
 
           {/* Visible Contact Rows */}
@@ -348,30 +365,6 @@ export const PublicProfilePage: React.FC = () => {
                   <div className="min-w-0 flex-1">
                     <div className="text-xs text-slate-500">Alternate Mobile (Masked)</div>
                     <div className="text-sm font-medium text-slate-600 font-mono">{displayedAltMobile}</div>
-                  </div>
-                </div>
-              )
-            )}
-            {displayedWhatsapp && (
-              isPaidLive ? (
-                <a
-                  href={`https://wa.me/${(info.whatsapp || '').replace(/[^0-9]/g, '')}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3.5 px-4 py-3.5 hover:bg-slate-50 transition-colors min-h-[52px]"
-                >
-                  <MessageCircle className="h-4 w-4 text-emerald-600 shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-xs text-slate-500">WhatsApp</div>
-                    <div className="text-sm font-medium text-slate-900 font-mono">{displayedWhatsapp}</div>
-                  </div>
-                </a>
-              ) : (
-                <div className="flex items-center gap-3.5 px-4 py-3.5 min-h-[52px]">
-                  <MessageCircle className="h-4 w-4 text-slate-400 shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-xs text-slate-500">WhatsApp (Masked)</div>
-                    <div className="text-sm font-medium text-slate-600 font-mono">{displayedWhatsapp}</div>
                   </div>
                 </div>
               )
@@ -469,12 +462,35 @@ export const PublicProfilePage: React.FC = () => {
             )}
           </div>
 
-          {/* Visible Social Links */}
-          {profile.socialLinks && profile.socialLinks.length > 0 && (
+          {/* Connect Online (includes WhatsApp & Social Links) */}
+          {((profile.socialLinks && profile.socialLinks.length > 0) || hasWhatsappItem) && (
             <div className="mt-6">
               <h2 className="text-xs font-semibold text-slate-500 mb-3">Connect Online</h2>
               <div className="grid grid-cols-2 gap-2.5">
-                {profile.socialLinks.map((link) =>
+                {hasWhatsappItem &&
+                  (isPaidLive && whatsappNumber ? (
+                    <a
+                      href={`https://wa.me/${whatsappNumber}?text=${encodeURIComponent(`Hi ${info.fullName || ''}, connecting via your TapNex smart card.`)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between px-3.5 py-3 rounded-xl border border-emerald-200 hover:border-emerald-300 bg-emerald-50 text-sm font-semibold text-emerald-900 min-h-[44px]"
+                    >
+                      <span className="inline-flex items-center gap-2 truncate">
+                        <MessageCircle className="h-4 w-4 text-emerald-600 shrink-0" />
+                        <span className="truncate">WhatsApp</span>
+                      </span>
+                      <ExternalLink className="h-3.5 w-3.5 text-emerald-600 shrink-0 ml-2" />
+                    </a>
+                  ) : (
+                    <div className="flex items-center justify-between px-3.5 py-3 rounded-xl border border-slate-200 bg-slate-50/70 text-sm font-medium text-slate-500 min-h-[44px]">
+                      <span className="inline-flex items-center gap-2 truncate">
+                        <MessageCircle className="h-4 w-4 text-slate-400 shrink-0" />
+                        <span className="truncate">WhatsApp</span>
+                      </span>
+                      <Lock className="h-3.5 w-3.5 text-slate-400 shrink-0 ml-2" />
+                    </div>
+                  ))}
+                {(profile.socialLinks || []).map((link) =>
                   isPaidLive ? (
                     <a
                       key={link.id}
@@ -570,5 +586,6 @@ export const PublicProfilePage: React.FC = () => {
         </div>
       </div>
     </div>
+    </ScreenProtectionShield>
   );
 };

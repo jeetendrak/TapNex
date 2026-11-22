@@ -75,6 +75,7 @@ import {
   getSupportTickets,
   getUserById,
   getUserProfiles,
+  markProfilePaymentCompleted,
   saveCardTemplate,
   saveEmailTemplate,
   savePrinterRecord,
@@ -88,6 +89,7 @@ import {
   updateUserRoleAndStatus,
   type AuditLogPreset,
 } from '../../lib/firestoreService';
+import { sanitizeRichBioHtml } from '../../lib/richText';
 import { exportRowsToCsv, exportRowsToExcel } from '../../lib/exportUtils';
 import { downloadBlob, generatePrintReadyPdfBlob } from '../../lib/printPdf';
 import { compressImageFileToDataUrl, generatePrinterAuthId } from '../../lib/qrArtwork';
@@ -191,7 +193,8 @@ const AdminProfileInspectorModal: React.FC<{
   onClose: () => void;
   onToggleApproval: (profile: ProfileRecord) => Promise<void>;
   onToggleActive: (profile: ProfileRecord) => Promise<void>;
-}> = ({ profile, owner, paid, onClose, onToggleApproval, onToggleActive }) => {
+  onMarkPaymentCompleted: (profile: ProfileRecord, completed: boolean) => Promise<void>;
+}> = ({ profile, owner, paid, onClose, onToggleApproval, onToggleActive, onMarkPaymentCompleted }) => {
   const [busy, setBusy] = useState(false);
   const info = profile.personalInformation || ({} as PersonalInformation);
   const vis = profile.visibilitySettings;
@@ -275,10 +278,16 @@ const AdminProfileInspectorModal: React.FC<{
                   </span>
                   <span
                     className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
-                      profile.isPublic ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                      profile.isPublic && !profile.adminDisabled
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : 'bg-rose-100 text-rose-800'
                     }`}
                   >
-                    {profile.isPublic ? 'Public Enabled' : 'Disabled'}
+                    {profile.adminDisabled
+                      ? 'Disabled by Admin'
+                      : profile.isPublic
+                        ? 'Public Enabled'
+                        : 'Disabled'}
                   </span>
                 </div>
               </div>
@@ -294,6 +303,28 @@ const AdminProfileInspectorModal: React.FC<{
                 <ExternalLink className="h-3.5 w-3.5" />
                 <span>Open Public Profile</span>
               </a>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await onMarkPaymentCompleted(profile, !profile.paymentConfirmed);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg disabled:opacity-50 ${
+                  profile.paymentConfirmed
+                    ? 'border border-amber-300 bg-amber-50 text-amber-900'
+                    : 'bg-[#1D4ED8] hover:bg-blue-700 text-white'
+                }`}
+              >
+                <CreditCard className="h-3.5 w-3.5" />
+                <span>
+                  {profile.paymentConfirmed ? 'Clear Payment Completed' : 'Mark Payment Completed'}
+                </span>
+              </button>
               <button
                 type="button"
                 disabled={busy}
@@ -327,10 +358,14 @@ const AdminProfileInspectorModal: React.FC<{
                     setBusy(false);
                   }
                 }}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-semibold rounded-lg disabled:opacity-50"
+                className={`inline-flex items-center gap-1.5 px-3.5 py-2 border text-xs font-semibold rounded-lg disabled:opacity-50 ${
+                  profile.isPublic && !profile.adminDisabled
+                    ? 'border-rose-300 text-rose-700 hover:bg-rose-50'
+                    : 'border-emerald-300 text-emerald-700 hover:bg-emerald-50'
+                }`}
               >
                 <Power className="h-3.5 w-3.5" />
-                <span>{profile.isPublic ? 'Disable' : 'Enable'}</span>
+                <span>{profile.isPublic && !profile.adminDisabled ? 'Disable Link' : 'Enable Link'}</span>
               </button>
             </div>
           </div>
@@ -340,7 +375,10 @@ const AdminProfileInspectorModal: React.FC<{
               <div className="font-semibold text-[#0B1D3A] mb-1">
                 Short Bio ({vis.shortBio ? 'Visible publicly' : 'Hidden from public'})
               </div>
-              <p>{info.shortBio}</p>
+              <div
+                className="leading-relaxed [&_p]:my-1"
+                dangerouslySetInnerHTML={{ __html: sanitizeRichBioHtml(info.shortBio) }}
+              />
             </div>
           )}
 
@@ -437,7 +475,7 @@ export const AdminDashboardPage: React.FC = () => {
   const revenueByCardType = useMemo(() => {
     const map: Record<string, number> = {};
     for (const o of orders) {
-      const k = o.cardType || 'Standard NFC';
+      const k = o.cardType || 'Standard SMART';
       map[k] = (map[k] || 0) + (o.total || 0);
     }
     return Object.entries(map).map(([name, revenue]) => ({ name, revenue }));
@@ -838,14 +876,32 @@ export const AdminUserDetailPage: React.FC = () => {
 
   const handleTogglePublic = async (p: ProfileRecord) => {
     if (!userRecord) return;
-    await adminToggleProfileStatus({
+    const nextPublic = !(p.isPublic && !p.adminDisabled);
+    const updated = await adminToggleProfileStatus({
       profile: p,
-      isPublic: !p.isPublic,
+      isPublic: nextPublic,
       actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
       inactiveMessage: appSettings.inactiveProfileMessage,
     });
-    notify(p.isPublic ? 'Profile disabled' : 'Profile enabled', `/p/${p.slug}`, 'success');
-    setInspectedProfile((curr) => (curr?.profileId === p.profileId ? { ...p, isPublic: !p.isPublic } : curr));
+    notify(nextPublic ? 'Profile enabled' : 'Profile link disabled', `/p/${p.slug}`, 'success');
+    setInspectedProfile((curr) => (curr?.profileId === p.profileId ? updated : curr));
+    load();
+  };
+
+  const handleMarkPaymentCompleted = async (p: ProfileRecord, completed: boolean) => {
+    if (!userRecord) return;
+    const updated = await markProfilePaymentCompleted({
+      profile: p,
+      completed,
+      actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+      inactiveMessage: appSettings.inactiveProfileMessage,
+    });
+    notify(
+      completed ? 'Payment marked completed' : 'Payment status cleared',
+      `/p/${p.slug}`,
+      'success'
+    );
+    setInspectedProfile((curr) => (curr?.profileId === p.profileId ? updated : curr));
     load();
   };
 
@@ -883,11 +939,13 @@ export const AdminUserDetailPage: React.FC = () => {
             ) : (
               <div className="space-y-3">
                 {profiles.map((p) => {
-                  const paid = orders.some(
-                    (o) =>
-                      o.profileId === p.profileId &&
-                      (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed')
-                  );
+                  const paid =
+                    Boolean(p.paymentConfirmed) ||
+                    orders.some(
+                      (o) =>
+                        o.profileId === p.profileId &&
+                        (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed')
+                    );
                   return (
                     <div key={p.profileId} className="p-4 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div>
@@ -895,7 +953,7 @@ export const AdminUserDetailPage: React.FC = () => {
                           {p.profileLabel || p.personalInformation.fullName || p.slug}
                         </div>
                         <div className="text-xs font-mono text-slate-500">
-                          /p/{p.slug} · {p.isPublic ? 'Enabled' : 'Disabled'} ·{' '}
+                          /p/{p.slug} · {p.adminDisabled ? 'Disabled by Admin' : p.isPublic ? 'Enabled' : 'Disabled'} ·{' '}
                           {paid ? 'Paid' : p.adminApproved ? 'Admin Approved' : 'Payment Pending'}
                         </div>
                       </div>
@@ -908,6 +966,16 @@ export const AdminUserDetailPage: React.FC = () => {
                           <Eye className="h-3.5 w-3.5" />
                           <span>Inspect Profile</span>
                         </button>
+                        {!p.paymentConfirmed && (
+                          <button
+                            type="button"
+                            onClick={() => handleMarkPaymentCompleted(p, true)}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#1D4ED8] hover:bg-blue-700 text-white text-xs font-semibold"
+                          >
+                            <CreditCard className="h-3.5 w-3.5" />
+                            <span>Mark Paid</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => handleToggleApproval(p)}
@@ -934,7 +1002,7 @@ export const AdminUserDetailPage: React.FC = () => {
                           onClick={() => handleTogglePublic(p)}
                           className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold hover:bg-slate-50"
                         >
-                          {p.isPublic ? 'Disable' : 'Enable'}
+                          {p.isPublic && !p.adminDisabled ? 'Disable Link' : 'Enable Link'}
                         </button>
                         <button
                           type="button"
@@ -972,14 +1040,18 @@ export const AdminUserDetailPage: React.FC = () => {
         <AdminProfileInspectorModal
           profile={inspectedProfile}
           owner={user}
-          paid={orders.some(
-            (o) =>
-              o.profileId === inspectedProfile.profileId &&
-              (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed')
-          )}
+          paid={
+            Boolean(inspectedProfile.paymentConfirmed) ||
+            orders.some(
+              (o) =>
+                o.profileId === inspectedProfile.profileId &&
+                (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed')
+            )
+          }
           onClose={() => setInspectedProfile(null)}
           onToggleApproval={handleToggleApproval}
           onToggleActive={handleTogglePublic}
+          onMarkPaymentCompleted={handleMarkPaymentCompleted}
         />
       )}
     </PortalLayout>
@@ -1901,7 +1973,7 @@ export const AdminCardTemplatesPage: React.FC = () => {
   const [templates, setTemplates] = useState<CardTemplateRecord[]>(DEFAULT_CARD_TEMPLATES);
   const [name, setName] = useState('');
   const [priceInr, setPriceInr] = useState(1350);
-  const [cardType, setCardType] = useState('Matte PVC NFC');
+  const [cardType, setCardType] = useState('Matte PVC SMART');
   const [category, setCategory] = useState('Executive');
   const [description, setDescription] = useState('');
   const [bgColor, setBgColor] = useState('#0B1D3A');
@@ -1925,7 +1997,7 @@ export const AdminCardTemplatesPage: React.FC = () => {
       templateId: `tpl-${Date.now()}`,
       name: name.trim() || 'Untitled Smart Card',
       priceInr: Math.max(0, Number(priceInr) || 0),
-      cardType: cardType.trim() || 'Matte PVC NFC',
+      cardType: cardType.trim() || 'Matte PVC SMART',
       category: category.trim() || 'Executive',
       description: description.trim(),
       active: newIsDefault ? true : newActive,
@@ -2138,7 +2210,7 @@ export const AdminCardTemplatesPage: React.FC = () => {
                 maxLength={80}
                 value={cardType}
                 onChange={(e) => setCardType(e.target.value)}
-                placeholder="Matte PVC NFC"
+                placeholder="Matte PVC SMART"
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
               />
             </div>
@@ -2167,7 +2239,7 @@ export const AdminCardTemplatesPage: React.FC = () => {
                 maxLength={400}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Short description of finish, target audience, and NFC compatibility..."
+                placeholder="Short description of finish, target audience, and SMART compatibility..."
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
               />
             </div>
@@ -3043,15 +3115,35 @@ export const AdminProfilesPage: React.FC = () => {
 
   const handleToggleActive = async (p: ProfileRecord) => {
     if (!userRecord) return;
-    await adminToggleProfileStatus({
+    const nextPublic = !(p.isPublic && !p.adminDisabled);
+    const updated = await adminToggleProfileStatus({
       profile: p,
-      isPublic: !p.isPublic,
+      isPublic: nextPublic,
       actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
       inactiveMessage: appSettings.inactiveProfileMessage,
     });
-    notify(p.isPublic ? 'Profile disabled' : 'Profile enabled', `/p/${p.slug}`, 'success');
+    notify(nextPublic ? 'Profile link enabled' : 'Profile link disabled', `/p/${p.slug}`, 'success');
     setInspectedProfile((curr) =>
-      curr?.profileId === p.profileId ? { ...p, isPublic: !p.isPublic } : curr
+      curr?.profileId === p.profileId ? updated : curr
+    );
+    load();
+  };
+
+  const handleMarkPaymentCompleted = async (p: ProfileRecord, completed: boolean) => {
+    if (!userRecord) return;
+    const updated = await markProfilePaymentCompleted({
+      profile: p,
+      completed,
+      actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+      inactiveMessage: appSettings.inactiveProfileMessage,
+    });
+    notify(
+      completed ? 'Payment marked completed' : 'Payment status cleared',
+      `/p/${p.slug}`,
+      'success'
+    );
+    setInspectedProfile((curr) =>
+      curr?.profileId === p.profileId ? updated : curr
     );
     load();
   };
@@ -3111,9 +3203,11 @@ export const AdminProfilesPage: React.FC = () => {
               ) : (
                 filtered.map((p) => {
                   const owner = userMap.get(p.uid);
-                  const paid = orders.some(
-                    (o) => o.profileId === p.profileId && (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed')
-                  );
+                  const paid =
+                    Boolean(p.paymentConfirmed) ||
+                    orders.some(
+                      (o) => o.profileId === p.profileId && (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed')
+                    );
                   return (
                     <tr key={p.profileId}>
                       <td className="py-3 px-4">
@@ -3144,8 +3238,8 @@ export const AdminProfilesPage: React.FC = () => {
                         )}
                       </td>
                       <td className="py-3 px-4">
-                        <span className={`font-semibold ${p.isPublic ? 'text-emerald-700' : 'text-rose-700'}`}>
-                          {p.isPublic ? 'Enabled' : 'Disabled'}
+                        <span className={`font-semibold ${p.isPublic && !p.adminDisabled ? 'text-emerald-700' : 'text-rose-700'}`}>
+                          {p.adminDisabled ? 'Disabled by Admin' : p.isPublic ? 'Enabled' : 'Disabled'}
                         </span>
                       </td>
                       <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
@@ -3157,6 +3251,16 @@ export const AdminProfilesPage: React.FC = () => {
                           <Eye className="h-3.5 w-3.5" />
                           <span>Inspect Profile</span>
                         </button>
+                        {!p.paymentConfirmed && (
+                          <button
+                            type="button"
+                            onClick={() => handleMarkPaymentCompleted(p, true)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#1D4ED8] hover:bg-blue-700 text-white text-xs font-semibold"
+                          >
+                            <CreditCard className="h-3.5 w-3.5" />
+                            <span>Mark Paid</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => handleToggleApproval(p)}
@@ -3175,7 +3279,7 @@ export const AdminProfilesPage: React.FC = () => {
                           className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold hover:bg-slate-50"
                         >
                           <Power className="h-3.5 w-3.5" />
-                          <span>{p.isPublic ? 'Disable' : 'Enable'}</span>
+                          <span>{p.isPublic && !p.adminDisabled ? 'Disable Link' : 'Enable Link'}</span>
                         </button>
                         <button
                           type="button"
@@ -3214,14 +3318,18 @@ export const AdminProfilesPage: React.FC = () => {
         <AdminProfileInspectorModal
           profile={inspectedProfile}
           owner={userMap.get(inspectedProfile.uid) || null}
-          paid={orders.some(
-            (o) =>
-              o.profileId === inspectedProfile.profileId &&
-              (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed')
-          )}
+          paid={
+            Boolean(inspectedProfile.paymentConfirmed) ||
+            orders.some(
+              (o) =>
+                o.profileId === inspectedProfile.profileId &&
+                (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed')
+            )
+          }
           onClose={() => setInspectedProfile(null)}
           onToggleApproval={handleToggleApproval}
           onToggleActive={handleToggleActive}
+          onMarkPaymentCompleted={handleMarkPaymentCompleted}
         />
       )}
     </PortalLayout>
@@ -3251,7 +3359,7 @@ export const AdminApprovedDesignsPage: React.FC = () => {
   const [printPrinterId, setPrintPrinterId] = useState('admin_inhouse');
   const [printInitialStatus, setPrintInitialStatus] = useState<OrderStatus>('Assigned to Printer');
   const [printQuantity, setPrintQuantity] = useState(1);
-  const [printCardType, setPrintCardType] = useState('Matte PVC NFC');
+  const [printCardType, setPrintCardType] = useState('Matte PVC SMART');
   const [printUnitPrice, setPrintUnitPrice] = useState(999);
   const [printMarkPaid, setPrintMarkPaid] = useState(false);
   const [printNotes, setPrintNotes] = useState('');
@@ -3344,7 +3452,7 @@ export const AdminApprovedDesignsPage: React.FC = () => {
         : 'Assigned to Printer'
     );
     setPrintQuantity(linkedOrder?.quantity || 1);
-    setPrintCardType(linkedOrder?.cardType || tpl?.cardType || 'Matte PVC NFC');
+    setPrintCardType(linkedOrder?.cardType || tpl?.cardType || 'Matte PVC SMART');
     setPrintUnitPrice(tpl?.priceInr ?? appSettings.baseCardPriceInr ?? 999);
     setPrintMarkPaid(Boolean(isPaid));
     setPrintNotes(linkedOrder?.internalNotes || 'Dispatched directly from Approved Card Designs');
@@ -3678,7 +3786,7 @@ export const AdminApprovedDesignsPage: React.FC = () => {
                     />
                   )}
                   <div className="space-y-1 text-xs min-w-0 flex-1">
-                    <div className="font-semibold text-[#0B1D3A]">Verified NFC / QR Target</div>
+                    <div className="font-semibold text-[#0B1D3A]">Verified SMART / QR Target</div>
                     <div className="font-mono text-slate-600 break-all">{printResult.qrRecord.targetUrl}</div>
                   </div>
                 </div>

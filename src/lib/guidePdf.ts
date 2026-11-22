@@ -160,10 +160,10 @@ export async function generateGuidePdfBlob(
   pdf.setFont('helvetica', 'normal');
   pdf.setFontSize(9.5);
   const stdLines = [
-    '• Physical Card Specification: ISO/IEC 7810 ID-1 (85.6 × 54 mm) + 3 mm Print Bleed · 300 DPI Print PDF',
-    '• Dual Identity Technology: NTAG215 NFC Chip URL + Error-Correction-H Fallback QR Code (1024px / SVG)',
-    '• Digital Profile Isolation: Field-level Visibility Controls + RFC vCard 3.0 (.vcf) Instant Download',
-    '• Commerce & Fulfilment: Razorpay Verified Checkout · 12-Step End-to-End India Fulfilment (10–15 Days)',
+    '• Physical Card Specification: ISO/IEC 7810 ID-1 (85.6 × 54 mm) + 3 mm Print Bleed · 1:1 WYSIWYG 300 DPI PDF',
+    '• Dual Identity Technology: NTAG215 SMART Chip URL + Error-Correction-H Fallback QR Code (1024px / SVG)',
+    '• Digital Profile Isolation: Field Visibility Controls, Rich Bio, Screen Protection & RFC vCard 3.0 (.vcf)',
+    '• Commerce & Fulfilment: 6 Payment Gateways · Payment-Gated Link Unlock · 12-Step Fulfilment (10–15 Days)',
   ];
   stdLines.forEach((line, idx) => {
     pdf.text(line, marginX + 6, y + 18 + idx * 5.8);

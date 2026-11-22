@@ -25,6 +25,7 @@ import {
   PAYMENT_GATEWAY_ORDER,
 } from './constants';
 import { generateHighResQrArtwork } from './qrArtwork';
+import { sanitizeRichBioHtml } from './richText';
 import { clearAllLocalStudioDrafts } from './studioDraft';
 import type {
   AppSettingsRecord,
@@ -169,13 +170,16 @@ export function buildSanitizedPublicProfile(
   const v = profile.visibilitySettings;
   const info = profile.personalInformation;
 
-  if (!profile.isPublic) {
+  if (!profile.isPublic || profile.adminDisabled) {
     return {
       slug: profile.slug,
       profileId: profile.profileId,
       uid: profile.uid,
-      isPublic: false,
-      unavailableMessage: inactiveMessage,
+      isPublic: Boolean(profile.isPublic),
+      ...(profile.adminDisabled ? { adminDisabled: true } : {}),
+      unavailableMessage: profile.adminDisabled
+        ? 'This digital profile link has been disabled by the administrator.'
+        : inactiveMessage,
     };
   }
 
@@ -185,7 +189,7 @@ export function buildSanitizedPublicProfile(
   if (v.jobTitle && info.jobTitle) publicInfo.jobTitle = info.jobTitle;
   if (v.companyName && info.companyName) publicInfo.companyName = info.companyName;
   if (v.businessCategory && info.businessCategory) publicInfo.businessCategory = info.businessCategory;
-  if (v.shortBio && info.shortBio) publicInfo.shortBio = info.shortBio;
+  if (v.shortBio && info.shortBio) publicInfo.shortBio = sanitizeRichBioHtml(info.shortBio);
   if (v.mobile && info.mobile) publicInfo.mobile = info.mobile;
   if (v.alternateMobile && info.alternateMobile) publicInfo.alternateMobile = info.alternateMobile;
   if (v.whatsapp && info.whatsapp) publicInfo.whatsapp = info.whatsapp;
@@ -224,6 +228,8 @@ export function buildSanitizedPublicProfile(
     socialLinks: publicSocials,
     customFields: publicCustomFields,
     themeColor: '#0B1D3A',
+    ...(profile.paymentConfirmed ? { paymentConfirmed: true } : {}),
+    ...(profile.paymentCompletedAt ? { paymentCompletedAt: profile.paymentCompletedAt } : {}),
     ...(profile.adminApproved ? { adminApproved: true } : {}),
     ...(profile.adminApprovedAt ? { adminApprovedAt: profile.adminApprovedAt } : {}),
     ...(profile.adminApprovedBy ? { adminApprovedBy: profile.adminApprovedBy } : {}),
@@ -486,32 +492,42 @@ export async function saveProfileAndSyncPublic(
     { merge: true }
   );
 
-  let existingPaymentConfirmed = false;
+  let existingPaymentConfirmed = Boolean(profile.paymentConfirmed);
+  let existingPaymentCompletedAt = profile.paymentCompletedAt || '';
   let existingLastPaidOrderId = '';
   let existingAdminApproved = Boolean(profile.adminApproved);
   let existingAdminApprovedAt = profile.adminApprovedAt || '';
   let existingAdminApprovedBy = profile.adminApprovedBy || '';
+  let existingAdminDisabled = Boolean(profile.adminDisabled);
   try {
     const existingPub = await getDoc(doc(db, 'publicProfiles', cleanSlug));
     if (existingPub.exists()) {
       const pubData = existingPub.data() as PublicProfileRecord;
-      existingPaymentConfirmed = Boolean(pubData.paymentConfirmed);
+      existingPaymentConfirmed = existingPaymentConfirmed || Boolean(pubData.paymentConfirmed);
+      existingPaymentCompletedAt = existingPaymentCompletedAt || pubData.paymentCompletedAt || '';
       existingLastPaidOrderId = pubData.lastPaidOrderId || '';
       if (!existingAdminApproved && pubData.adminApproved) {
         existingAdminApproved = true;
         existingAdminApprovedAt = pubData.adminApprovedAt || '';
         existingAdminApprovedBy = pubData.adminApprovedBy || '';
       }
+      if (!existingAdminDisabled && pubData.adminDisabled) {
+        existingAdminDisabled = true;
+      }
     } else if (previousSlug && previousSlug !== cleanSlug) {
       const prevPub = await getDoc(doc(db, 'publicProfiles', previousSlug));
       if (prevPub.exists()) {
         const pubData = prevPub.data() as PublicProfileRecord;
-        existingPaymentConfirmed = Boolean(pubData.paymentConfirmed);
+        existingPaymentConfirmed = existingPaymentConfirmed || Boolean(pubData.paymentConfirmed);
+        existingPaymentCompletedAt = existingPaymentCompletedAt || pubData.paymentCompletedAt || '';
         existingLastPaidOrderId = pubData.lastPaidOrderId || '';
         if (!existingAdminApproved && pubData.adminApproved) {
           existingAdminApproved = true;
           existingAdminApprovedAt = pubData.adminApprovedAt || '';
           existingAdminApprovedBy = pubData.adminApprovedBy || '';
+        }
+        if (!existingAdminDisabled && pubData.adminDisabled) {
+          existingAdminDisabled = true;
         }
       }
     }
@@ -540,9 +556,21 @@ export async function saveProfileAndSyncPublic(
     batch.delete(doc(db, 'publicProfiles', previousSlug));
   }
 
-  batch.set(doc(db, 'publicProfiles', cleanSlug), {
-    ...buildSanitizedPublicProfile(updatedProfile, inactiveMessage),
+  const normalizedForPublic: ProfileRecord = {
+    ...updatedProfile,
     paymentConfirmed: existingPaymentConfirmed,
+    ...(existingPaymentCompletedAt ? { paymentCompletedAt: existingPaymentCompletedAt } : {}),
+    adminApproved: existingAdminApproved,
+    adminApprovedAt: existingAdminApprovedAt,
+    adminApprovedBy: existingAdminApprovedBy,
+    adminDisabled: existingAdminDisabled,
+  };
+
+  batch.set(doc(db, 'publicProfiles', cleanSlug), {
+    ...buildSanitizedPublicProfile(normalizedForPublic, inactiveMessage),
+    paymentConfirmed: existingPaymentConfirmed,
+    ...(existingPaymentCompletedAt ? { paymentCompletedAt: existingPaymentCompletedAt } : {}),
+    adminDisabled: existingAdminDisabled,
     ...(existingAdminApproved
       ? {
           adminApproved: true,
@@ -596,15 +624,18 @@ export async function adminToggleProfileStatus(params: {
   isPublic: boolean;
   actor: { uid: string; email?: string; role: UserRole };
   inactiveMessage?: string;
-}): Promise<void> {
-  const updated: ProfileRecord = { ...params.profile, isPublic: params.isPublic };
-  let existingPaymentConfirmed = false;
+}): Promise<ProfileRecord> {
+  const adminDisabled = !params.isPublic;
+  const updated: ProfileRecord = { ...params.profile, isPublic: params.isPublic, adminDisabled };
+  let existingPaymentConfirmed = Boolean(params.profile.paymentConfirmed);
+  let existingPaymentCompletedAt = params.profile.paymentCompletedAt || '';
   let existingLastPaidOrderId = '';
   try {
     const existingPub = await getDoc(doc(db, 'publicProfiles', params.profile.slug));
     if (existingPub.exists()) {
       const pubData = existingPub.data() as PublicProfileRecord;
-      existingPaymentConfirmed = Boolean(pubData.paymentConfirmed);
+      existingPaymentConfirmed = existingPaymentConfirmed || Boolean(pubData.paymentConfirmed);
+      existingPaymentCompletedAt = existingPaymentCompletedAt || pubData.paymentCompletedAt || '';
       existingLastPaidOrderId = pubData.lastPaidOrderId || '';
     }
   } catch {
@@ -614,11 +645,14 @@ export async function adminToggleProfileStatus(params: {
   const batch = writeBatch(db);
   batch.update(doc(db, 'profiles', params.profile.profileId), {
     isPublic: params.isPublic,
+    adminDisabled,
     updatedAt: serverTimestamp(),
   });
   batch.set(doc(db, 'publicProfiles', params.profile.slug), {
     ...buildSanitizedPublicProfile(updated, params.inactiveMessage),
     paymentConfirmed: existingPaymentConfirmed,
+    ...(existingPaymentCompletedAt ? { paymentCompletedAt: existingPaymentCompletedAt } : {}),
+    adminDisabled,
     ...(params.profile.adminApproved
       ? {
           adminApproved: true,
@@ -640,6 +674,77 @@ export async function adminToggleProfileStatus(params: {
       targetId: params.profile.profileId,
       details: `${params.isPublic ? 'Enabled' : 'Disabled'} digital profile /p/${params.profile.slug}`,
     });
+    return updated;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `profiles/${params.profile.profileId}`);
+  }
+}
+
+export async function markProfilePaymentCompleted(params: {
+  profile: ProfileRecord;
+  completed?: boolean;
+  reference?: string;
+  actor: { uid: string; email?: string; role: UserRole };
+  inactiveMessage?: string;
+}): Promise<ProfileRecord> {
+  const completed = params.completed ?? true;
+  const completedAt = completed ? new Date().toISOString() : '';
+  const paymentRef = (params.reference || '').trim().slice(0, 128);
+  const updated: ProfileRecord = {
+    ...params.profile,
+    isPublic: completed ? true : params.profile.isPublic,
+    paymentConfirmed: completed,
+    paymentCompletedAt: completedAt,
+    paymentReference: paymentRef,
+  };
+
+  let existingLastPaidOrderId = '';
+  try {
+    const existingPub = await getDoc(doc(db, 'publicProfiles', params.profile.slug));
+    if (existingPub.exists()) {
+      const pubData = existingPub.data() as PublicProfileRecord;
+      existingLastPaidOrderId = pubData.lastPaidOrderId || '';
+    }
+  } catch {
+    // ignore read fallback
+  }
+
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'profiles', params.profile.profileId), {
+    isPublic: updated.isPublic,
+    paymentConfirmed: completed,
+    paymentCompletedAt: completedAt,
+    paymentReference: paymentRef,
+    updatedAt: serverTimestamp(),
+  });
+  batch.set(doc(db, 'publicProfiles', params.profile.slug), {
+    ...buildSanitizedPublicProfile(updated, params.inactiveMessage),
+    paymentConfirmed: completed,
+    paymentCompletedAt: completedAt,
+    adminDisabled: Boolean(updated.adminDisabled),
+    ...(updated.adminApproved
+      ? {
+          adminApproved: true,
+          ...(updated.adminApprovedAt ? { adminApprovedAt: updated.adminApprovedAt } : {}),
+          ...(updated.adminApprovedBy ? { adminApprovedBy: updated.adminApprovedBy } : {}),
+        }
+      : { adminApproved: false }),
+    ...(existingLastPaidOrderId ? { lastPaidOrderId: existingLastPaidOrderId } : {}),
+    updatedAt: serverTimestamp(),
+  });
+
+  try {
+    await batch.commit();
+    await recordAuditLog({
+      actorUid: params.actor.uid,
+      actorEmail: params.actor.email,
+      actorRole: params.actor.role,
+      action: completed ? 'MARK_PROFILE_PAYMENT_COMPLETED' : 'REVOKE_PROFILE_PAYMENT_STATUS',
+      targetCollection: 'profiles',
+      targetId: params.profile.profileId,
+      details: `${completed ? 'Marked payment completed' : 'Cleared payment completion'} for /p/${params.profile.slug}${paymentRef ? ` (Ref: ${paymentRef})` : ''}`,
+    });
+    return updated;
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `profiles/${params.profile.profileId}`);
   }
@@ -656,18 +761,21 @@ export async function adminSetProfileApproval(params: {
   const updated: ProfileRecord = {
     ...params.profile,
     isPublic: params.approved ? true : params.profile.isPublic,
+    adminDisabled: params.approved ? false : Boolean(params.profile.adminDisabled),
     adminApproved: params.approved,
     adminApprovedAt: approvedAt,
     adminApprovedBy: approvedBy,
   };
 
-  let existingPaymentConfirmed = false;
+  let existingPaymentConfirmed = Boolean(params.profile.paymentConfirmed);
+  let existingPaymentCompletedAt = params.profile.paymentCompletedAt || '';
   let existingLastPaidOrderId = '';
   try {
     const existingPub = await getDoc(doc(db, 'publicProfiles', params.profile.slug));
     if (existingPub.exists()) {
       const pubData = existingPub.data() as PublicProfileRecord;
-      existingPaymentConfirmed = Boolean(pubData.paymentConfirmed);
+      existingPaymentConfirmed = existingPaymentConfirmed || Boolean(pubData.paymentConfirmed);
+      existingPaymentCompletedAt = existingPaymentCompletedAt || pubData.paymentCompletedAt || '';
       existingLastPaidOrderId = pubData.lastPaidOrderId || '';
     }
   } catch {
@@ -677,6 +785,7 @@ export async function adminSetProfileApproval(params: {
   const batch = writeBatch(db);
   batch.update(doc(db, 'profiles', params.profile.profileId), {
     isPublic: updated.isPublic,
+    adminDisabled: Boolean(updated.adminDisabled),
     adminApproved: params.approved,
     adminApprovedAt: approvedAt,
     adminApprovedBy: approvedBy,
@@ -685,6 +794,8 @@ export async function adminSetProfileApproval(params: {
   batch.set(doc(db, 'publicProfiles', params.profile.slug), {
     ...buildSanitizedPublicProfile(updated, params.inactiveMessage),
     paymentConfirmed: existingPaymentConfirmed,
+    ...(existingPaymentCompletedAt ? { paymentCompletedAt: existingPaymentCompletedAt } : {}),
+    adminDisabled: Boolean(updated.adminDisabled),
     adminApproved: params.approved,
     adminApprovedAt: approvedAt,
     adminApprovedBy: approvedBy,
@@ -750,7 +861,7 @@ function toFirestoreCardTemplate(t: CardTemplateRecord): Omit<CardTemplateRecord
     category: t.category || 'Executive',
     description: t.description || '',
     priceInr: Math.max(0, Number(t.priceInr) || 0),
-    cardType: t.cardType || 'Matte PVC NFC',
+    cardType: t.cardType || 'Matte PVC SMART',
     active: Boolean(t.active),
     isDefault: Boolean(t.isDefault),
     supportsVertical: Boolean(t.supportsVertical),

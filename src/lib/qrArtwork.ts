@@ -133,14 +133,36 @@ export async function compressImageFileToDataUrl(
   if (!preserveAlpha) {
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, targetW, targetH);
+    ctx.drawImage(img, 0, 0, targetW, targetH);
+    for (const quality of [0.9, 0.82, 0.72, 0.62, 0.5]) {
+      const encoded = canvas.toDataURL('image/jpeg', quality);
+      if (encoded.length <= maxChars) return encoded;
+    }
+    return canvas.toDataURL('image/jpeg', 0.45);
   }
+
+  ctx.clearRect(0, 0, targetW, targetH);
   ctx.drawImage(img, 0, 0, targetW, targetH);
+  const pngUrl = canvas.toDataURL('image/png');
+  if (pngUrl.length <= maxChars) return pngUrl;
 
-  const mime = preserveAlpha ? 'image/webp' : 'image/jpeg';
-  for (const quality of [0.9, 0.82, 0.72, 0.62, 0.5]) {
-    const encoded = canvas.toDataURL(mime, quality);
-    if (encoded.length <= maxChars) return encoded;
+  for (const quality of [0.9, 0.8, 0.68, 0.55]) {
+    const webpUrl = canvas.toDataURL('image/webp', quality);
+    if (webpUrl.length <= maxChars && webpUrl.startsWith('data:image/webp')) return webpUrl;
   }
 
-  return canvas.toDataURL(mime, 0.45);
+  // Fallback progressive PNG downscale to retain transparency everywhere
+  let w = targetW;
+  let h = targetH;
+  for (let i = 0; i < 4; i++) {
+    w = Math.max(64, Math.round(w * 0.78));
+    h = Math.max(64, Math.round(h * 0.78));
+    canvas.width = w;
+    canvas.height = h;
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    const resizedPng = canvas.toDataURL('image/png');
+    if (resizedPng.length <= maxChars) return resizedPng;
+  }
+  return canvas.toDataURL('image/png');
 }
