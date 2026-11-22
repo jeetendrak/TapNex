@@ -848,6 +848,36 @@ describe('Design Studio Layout Engine, Rich Bio Sanitizer & Link Controls', () =
     expect(rules).toContain("'SMART Help'");
     expect(rules).toContain('adminDisabled');
   });
+
+  it('hides photo frames and avoids round circle defaults on front and back across templates and blank designs', () => {
+    for (const side of [createBlankSideDesign('front'), createBlankSideDesign('back')]) {
+      expect(side.showAvatar).toBe(false);
+      expect(side.avatarShape).toBe('square');
+    }
+    for (const tpl of [BLANK_CARD_TEMPLATE, ...DEFAULT_CARD_TEMPLATES]) {
+      expect(Boolean(tpl.frontSpec.showAvatar)).toBe(false);
+      expect(Boolean(tpl.backSpec.showAvatar)).toBe(false);
+      expect(tpl.frontSpec.avatarShape).not.toBe('circle');
+      expect(tpl.backSpec.avatarShape).not.toBe('circle');
+    }
+  });
+
+  it('uses Download PDF label and provides separate Front PNG / Back PNG export actions in Admin & Printer portals', () => {
+    const printPdfSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/lib/printPdf.ts'), 'utf8');
+    expect(printPdfSrc).toContain('export async function generateCardSidePngBlob');
+
+    for (const relPath of [
+      'src/pages/printer/PrinterPortalPages.tsx',
+      'src/pages/admin/AdminPortalPages.tsx',
+    ]) {
+      const src = fs.readFileSync(path.resolve(process.cwd(), relPath), 'utf8');
+      expect(src).toContain('Download PDF');
+      expect(src).toContain('Front PNG');
+      expect(src).toContain('Back PNG');
+      expect(src).not.toContain('Download 300 DPI Print PDF');
+      expect(src).not.toContain('>300 DPI PDF<');
+    }
+  });
 });
 
 

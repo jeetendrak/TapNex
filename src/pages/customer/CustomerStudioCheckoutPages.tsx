@@ -695,8 +695,9 @@ export const CustomerCardStudioPage: React.FC = () => {
       const restored = backup.elements.filter((e) => !existingIds.has(e.id));
       setCurrentSide({
         ...currentSide,
-        showAvatar: backup.showAvatar || Boolean(pi?.photoDataUrl),
+        showAvatar: Boolean(backup.showAvatar || currentSide.showAvatar),
         avatarDataUrl: currentSide.avatarDataUrl || pi?.photoDataUrl,
+        avatarShape: currentSide.avatarShape || 'square',
         elements: [...currentSide.elements, ...restored],
       });
       return;
@@ -725,8 +726,9 @@ export const CustomerCardStudioPage: React.FC = () => {
     }
     setCurrentSide({
       ...currentSide,
-      showAvatar: Boolean(pi?.photoDataUrl) || Boolean(currentSide.showAvatar),
+      showAvatar: Boolean(currentSide.showAvatar),
       avatarDataUrl: currentSide.avatarDataUrl || pi?.photoDataUrl,
+      avatarShape: currentSide.avatarShape || 'square',
       elements: running,
     });
   };
@@ -805,7 +807,12 @@ export const CustomerCardStudioPage: React.FC = () => {
     try {
       const rawUrl = await readImageFileAsDataUrl(file);
       const autoFitted = await autoFitImageToSquareDataUrl(rawUrl);
-      setCurrentSide({ ...currentSide, avatarDataUrl: autoFitted, showAvatar: true });
+      setCurrentSide({
+        ...currentSide,
+        avatarDataUrl: autoFitted,
+        avatarShape: currentSide.avatarShape || 'square',
+        showAvatar: true,
+      });
       setPhotoCropSource(rawUrl);
       setSelectedTarget({ kind: 'avatar' });
       setMode('custom');
@@ -994,6 +1001,7 @@ export const CustomerCardStudioPage: React.FC = () => {
                         setCurrentSide({
                           ...currentSide,
                           avatarDataUrl: currentSide.avatarDataUrl || pi?.photoDataUrl || '',
+                          avatarShape: currentSide.avatarShape || 'square',
                           showAvatar: e.target.checked,
                         })
                       }
@@ -1425,13 +1433,13 @@ export const CustomerCardStudioPage: React.FC = () => {
                 <span className="text-xs font-bold text-[#0B1D3A]">Selected: Profile Photo ({currentSide.avatarSizeMm || 13} mm)</span>
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg p-0.5">
-                    {(['circle', 'rounded', 'square'] as const).map((shp) => (
+                    {(['square', 'rounded', 'circle'] as const).map((shp) => (
                       <button
                         key={shp}
                         type="button"
                         onClick={() => setCurrentSide({ ...currentSide, avatarShape: shp })}
                         className={`px-2 py-1 rounded text-[11px] font-semibold capitalize ${
-                          (currentSide.avatarShape || 'circle') === shp
+                          (currentSide.avatarShape || 'square') === shp
                             ? 'bg-[#0B1D3A] text-white'
                             : 'text-slate-600 hover:bg-slate-100'
                         }`}
@@ -2065,6 +2073,7 @@ export const CustomerCardStudioPage: React.FC = () => {
                               setCurrentSide({
                                 ...currentSide,
                                 avatarDataUrl: currentSide.avatarDataUrl || pi?.photoDataUrl || '',
+                                avatarShape: currentSide.avatarShape || 'square',
                                 showAvatar: e.target.checked,
                               })
                             }
@@ -2537,6 +2546,7 @@ export const CustomerCardStudioPage: React.FC = () => {
                             setCurrentSide({
                               ...currentSide,
                               avatarDataUrl: pi.photoDataUrl,
+                              avatarShape: currentSide.avatarShape || 'square',
                               showAvatar: true,
                             })
                           }
@@ -2566,6 +2576,7 @@ export const CustomerCardStudioPage: React.FC = () => {
                           setCurrentSide({
                             ...currentSide,
                             avatarDataUrl: currentSide.avatarDataUrl || pi?.photoDataUrl || '',
+                            avatarShape: currentSide.avatarShape || 'square',
                             showAvatar: !currentSide.showAvatar,
                           })
                         }
@@ -2580,13 +2591,13 @@ export const CustomerCardStudioPage: React.FC = () => {
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-[11px] font-medium text-slate-600">Photo Frame Shape:</span>
                           <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg p-0.5">
-                            {(['circle', 'rounded', 'square'] as const).map((shp) => (
+                            {(['square', 'rounded', 'circle'] as const).map((shp) => (
                               <button
                                 key={shp}
                                 type="button"
                                 onClick={() => setCurrentSide({ ...currentSide, avatarShape: shp })}
                                 className={`px-2.5 py-1 rounded text-[11px] font-semibold capitalize ${
-                                  (currentSide.avatarShape || 'circle') === shp
+                                  (currentSide.avatarShape || 'square') === shp
                                     ? 'bg-[#0B1D3A] text-white'
                                     : 'text-slate-600 hover:bg-slate-100'
                                 }`}
@@ -2899,11 +2910,13 @@ export const CustomerCardStudioPage: React.FC = () => {
         open={Boolean(photoCropSource)}
         imageSrc={photoCropSource || ''}
         title="Crop & Frame Card Photo"
+        frameShape={currentSide.avatarShape || 'square'}
         onClose={() => setPhotoCropSource(null)}
         onSave={(croppedDataUrl) => {
           setCurrentSide({
             ...currentSide,
             avatarDataUrl: croppedDataUrl,
+            avatarShape: currentSide.avatarShape || 'square',
             showAvatar: true,
           });
           setPhotoCropSource(null);

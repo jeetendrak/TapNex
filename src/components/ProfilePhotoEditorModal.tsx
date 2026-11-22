@@ -7,6 +7,7 @@ interface ProfilePhotoEditorModalProps {
   onClose: () => void;
   onSave: (croppedDataUrl: string) => void;
   title?: string;
+  frameShape?: 'circle' | 'rounded' | 'square';
 }
 
 const VIEWPORT_PX = 256;
@@ -85,6 +86,7 @@ export const ProfilePhotoEditorModal: React.FC<ProfilePhotoEditorModalProps> = (
   onClose,
   onSave,
   title = 'Crop & Adjust Profile Photo',
+  frameShape = 'circle',
 }) => {
   const [currentSrc, setCurrentSrc] = useState(imageSrc);
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number }>({ w: 1, h: 1 });
@@ -271,14 +273,24 @@ export const ProfilePhotoEditorModal: React.FC<ProfilePhotoEditorModalProps> = (
                 />
               )}
 
-              {/* Circular avatar guide overlay matching digital profile & card output */}
+              {/* Frame guide overlay matching selected output shape */}
               <div
-                className="pointer-events-none absolute inset-0 rounded-full border-2 border-white/90 shadow-[0_0_0_9999px_rgba(15,23,42,0.52)]"
+                className={`pointer-events-none absolute inset-0 ${
+                  frameShape === 'circle'
+                    ? 'rounded-full'
+                    : frameShape === 'rounded'
+                    ? 'rounded-2xl'
+                    : 'rounded-none'
+                } border-2 border-white/90 shadow-[0_0_0_9999px_rgba(15,23,42,0.52)]`}
                 aria-hidden="true"
               />
             </div>
             <p className="mt-2 text-[11px] text-slate-500">
-              Circle shows the exact area visible on your digital profile and SMART card
+              {frameShape === 'circle'
+                ? 'Circle shows the exact area visible on your digital profile and SMART card'
+                : frameShape === 'rounded'
+                ? 'Rounded frame shows the exact area visible on your SMART card'
+                : 'Square frame shows the exact area visible on your SMART card'}
             </p>
           </div>
 

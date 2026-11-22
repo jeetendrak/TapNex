@@ -318,11 +318,11 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
         {side.showAvatar && (() => {
           const resolvedPhoto = side.avatarDataUrl || personalInfo.photoDataUrl;
           const shapeClass =
-            side.avatarShape === 'rounded'
+            side.avatarShape === 'circle'
+              ? 'rounded-full'
+              : side.avatarShape === 'rounded'
               ? 'rounded-2xl'
-              : side.avatarShape === 'square'
-              ? 'rounded-md'
-              : 'rounded-full';
+              : 'rounded-none';
           return (
             <button
               type="button"

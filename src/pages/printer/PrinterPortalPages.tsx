@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Download, Printer, Truck, Wifi, FileText } from 'lucide-react';
+import { Download, Printer, Truck, Wifi, FileText, Image as ImageIcon } from 'lucide-react';
 import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { PortalLayout } from '../../components/PortalLayout';
 import { CardCanvasPreview } from '../../components/CardCanvasPreview';
@@ -18,7 +18,7 @@ import {
   sendAndLogTransactionalEmail,
   updateOrderWorkflow,
 } from '../../lib/firestoreService';
-import { downloadBlob, generatePrintReadyPdfBlob } from '../../lib/printPdf';
+import { downloadBlob, generateCardSidePngBlob, generatePrintReadyPdfBlob } from '../../lib/printPdf';
 import type {
   CardDesignRecord,
   OrderRecord,
@@ -237,6 +237,32 @@ export const PrinterOrderDetailPage: React.FC = () => {
     }
   };
 
+  const handleDownloadSidePng = async (side: 'front' | 'back') => {
+    if (!design || !qr?.pngDataUrl || !order) {
+      notify('Missing QR or design', 'Cannot export print PNG without verified QR artwork.', 'error');
+      return;
+    }
+    setGeneratingPdf(true);
+    try {
+      const result = await generateCardSidePngBlob({
+        design,
+        side,
+        info: cardPersonalInfo,
+        qrPngDataUrl: qr.pngDataUrl,
+      });
+      downloadBlob(result.blob, `${order.orderNumber}-${side}.png`);
+      notify(
+        `${side === 'front' ? 'Front' : 'Back'} PNG downloaded`,
+        `${result.widthPx} × ${result.heightPx} px (300 DPI PNG)`,
+        'success'
+      );
+    } catch (err) {
+      notify('PNG export failed', err instanceof Error ? err.message : 'Error creating PNG.', 'error');
+    } finally {
+      setGeneratingPdf(false);
+    }
+  };
+
   const handleStatusStep = async (nextStatus: OrderStatus) => {
     if (!order || !userRecord || updatingStep) return;
     setUpdatingStep(true);
@@ -333,16 +359,34 @@ export const PrinterOrderDetailPage: React.FC = () => {
               type="button"
               disabled={generatingPdf}
               onClick={() => handleDownloadPrintPdf(false)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#0B1D3A] text-white text-xs font-semibold rounded-xl"
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#0B1D3A] text-white text-xs font-semibold rounded-xl disabled:opacity-50"
             >
               <Download className="h-4 w-4" />
-              <span>{generatingPdf ? 'Rendering...' : 'Download 300 DPI Print PDF'}</span>
+              <span>{generatingPdf ? 'Rendering...' : 'Download PDF'}</span>
+            </button>
+            <button
+              type="button"
+              disabled={generatingPdf}
+              onClick={() => handleDownloadSidePng('front')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 border border-slate-300 text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <ImageIcon className="h-4 w-4 text-[#1D4ED8]" />
+              <span>Front PNG</span>
+            </button>
+            <button
+              type="button"
+              disabled={generatingPdf}
+              onClick={() => handleDownloadSidePng('back')}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 border border-slate-300 text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <ImageIcon className="h-4 w-4 text-emerald-600" />
+              <span>Back PNG</span>
             </button>
             <button
               type="button"
               disabled={generatingPdf}
               onClick={() => handleDownloadPrintPdf(true)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 border border-slate-300 text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-50"
+              className="inline-flex items-center gap-2 px-4 py-2.5 border border-slate-300 text-xs font-semibold rounded-xl text-slate-700 hover:bg-slate-50 disabled:opacity-50"
             >
               <FileText className="h-4 w-4" />
               <span>Download Proof w/ Guides</span>

@@ -180,13 +180,14 @@ async function renderCardSideToCanvas(params: {
   }
 
   // 4. Optional Avatar Photo (object-cover center-crop + transparent PNG + optional border)
-  if (params.side.showAvatar && params.side.avatarDataUrl) {
-    const avImg = await loadImage(params.side.avatarDataUrl);
+  const avatarSrc = params.side.avatarDataUrl || params.info.photoDataUrl;
+  if (params.side.showAvatar && avatarSrc) {
+    const avImg = await loadImage(avatarSrc);
     if (avImg) {
       const ax = bleedPx + (params.side.avatarX / 100) * trimPxW;
       const ay = bleedPx + (params.side.avatarY / 100) * trimPxH;
       const size = mmToPx300Dpi(params.side.avatarSizeMm || 13);
-      const shape = params.side.avatarShape || 'circle';
+      const shape = params.side.avatarShape || 'square';
 
       const traceAvatarPath = () => {
         ctx.beginPath();
@@ -391,6 +392,62 @@ export async function generatePrintReadyPdfBlob(params: {
   };
 }
 
+function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    if (typeof canvas.toBlob === 'function') {
+      canvas.toBlob((b) => {
+        if (b) {
+          resolve(b);
+          return;
+        }
+        try {
+          const dataUrl = canvas.toDataURL('image/png');
+          const bin = atob(dataUrl.split(',')[1] || '');
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          resolve(new Blob([bytes], { type: 'image/png' }));
+        } catch (err) {
+          reject(err);
+        }
+      }, 'image/png');
+      return;
+    }
+    try {
+      const dataUrl = canvas.toDataURL('image/png');
+      const bin = atob(dataUrl.split(',')[1] || '');
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      resolve(new Blob([bytes], { type: 'image/png' }));
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+export async function generateCardSidePngBlob(params: {
+  design: CardDesignRecord;
+  side: 'front' | 'back';
+  info: Partial<PersonalInformation>;
+  qrPngDataUrl?: string;
+  includeProofGuides?: boolean;
+}): Promise<{ blob: Blob; filename: string; widthPx: number; heightPx: number }> {
+  const sideSpec = params.side === 'front' ? params.design.frontDesign : params.design.backDesign;
+  const canvas = await renderCardSideToCanvas({
+    side: sideSpec,
+    orientation: params.design.cardOrientation,
+    info: params.info,
+    qrPngDataUrl: sideSpec.showQrSlot ? params.qrPngDataUrl : undefined,
+    includeProofGuides: params.includeProofGuides,
+  });
+  const blob = await canvasToPngBlob(canvas);
+  return {
+    blob,
+    filename: `tapnex-card-${params.side}-${params.design.designId.slice(0, 8)}.png`,
+    widthPx: canvas.width,
+    heightPx: canvas.height,
+  };
+}
+
 export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -401,3 +458,4 @@ export function downloadBlob(blob: Blob, filename: string): void {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+

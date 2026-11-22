@@ -878,7 +878,9 @@ function drawScenePrinterProductionDispatch(
   ctx.fillStyle = '#475569';
   ctx.font = '400 12px "Plus Jakarta Sans", sans-serif';
   ctx.fillText('1082 × 709 px (300 DPI) Front & Back PDF with Crop Marks', box.contentX + 180, box.contentY + 170);
-  drawButton(ctx, box.contentX + 180, box.contentY + 190, 224, 38, 'Download 300 DPI Print PDF', '#0B1D3A', '#FFFFFF', 12);
+  drawButton(ctx, box.contentX + 180, box.contentY + 190, 150, 38, 'Download PDF', '#0B1D3A', '#FFFFFF', 12);
+  drawButton(ctx, box.contentX + 338, box.contentY + 190, 96, 38, 'Front PNG', '#F8FAFC', '#0B1D3A', 11);
+  drawButton(ctx, box.contentX + 440, box.contentY + 190, 96, 38, 'Back PNG', '#F8FAFC', '#0B1D3A', 11);
   drawButton(ctx, box.contentX + 180, box.contentY + 238, 110, 34, 'QR PNG (1024px)', '#EEF2FF', '#1D4ED8', 11);
   drawButton(ctx, box.contentX + 298, box.contentY + 238, 106, 34, 'QR Vector SVG', '#EEF2FF', '#1D4ED8', 11);
 

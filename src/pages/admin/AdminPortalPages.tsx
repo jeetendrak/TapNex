@@ -91,7 +91,7 @@ import {
 } from '../../lib/firestoreService';
 import { sanitizeRichBioHtml } from '../../lib/richText';
 import { exportRowsToCsv, exportRowsToExcel } from '../../lib/exportUtils';
-import { downloadBlob, generatePrintReadyPdfBlob } from '../../lib/printPdf';
+import { downloadBlob, generateCardSidePngBlob, generatePrintReadyPdfBlob } from '../../lib/printPdf';
 import { compressImageFileToDataUrl, generatePrinterAuthId } from '../../lib/qrArtwork';
 import { DEFAULT_CARD_TEMPLATES, INDIAN_STATES, ORDER_STATUS_FLOW } from '../../lib/constants';
 import type {
@@ -1528,6 +1528,37 @@ export const AdminOrderDetailPage: React.FC = () => {
     }
   };
 
+  const handleDownloadSidePng = async (side: 'front' | 'back') => {
+    if (!design) {
+      notify('Missing card design', 'Linked card design could not be loaded.', 'error');
+      return;
+    }
+    setGeneratingPdf(true);
+    try {
+      let activeQr = qr;
+      if (!activeQr?.pngDataUrl) {
+        activeQr = await handlePrepareQrAndPrint();
+      }
+      if (!activeQr?.pngDataUrl) return;
+      const res = await generateCardSidePngBlob({
+        design,
+        side,
+        info: cardPersonalInfo,
+        qrPngDataUrl: activeQr.pngDataUrl,
+      });
+      downloadBlob(res.blob, `${order.orderNumber}-${side}.png`);
+      notify(
+        `${side === 'front' ? 'Front' : 'Back'} PNG downloaded`,
+        `${res.widthPx} × ${res.heightPx} px (300 DPI PNG)`,
+        'success'
+      );
+    } catch (err) {
+      notify('PNG export failed', err instanceof Error ? err.message : 'Unable to generate PNG.', 'error');
+    } finally {
+      setGeneratingPdf(false);
+    }
+  };
+
   const handleAdminDispatch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userRecord) return;
@@ -1602,7 +1633,25 @@ export const AdminOrderDetailPage: React.FC = () => {
               className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-[#0B1D3A] hover:bg-[#132A52] text-white rounded-xl text-xs font-semibold disabled:opacity-50"
             >
               <PrinterIcon className="h-4 w-4" />
-              <span>{generatingPdf ? 'Building PDF...' : 'Download 300 DPI Print PDF'}</span>
+              <span>{generatingPdf ? 'Building...' : 'Download PDF'}</span>
+            </button>
+            <button
+              type="button"
+              disabled={generatingPdf || preparingPrint}
+              onClick={() => handleDownloadSidePng('front')}
+              className="inline-flex items-center gap-1.5 px-3 py-2.5 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold disabled:opacity-50"
+            >
+              <ImageIcon className="h-4 w-4 text-[#1D4ED8]" />
+              <span>Front PNG</span>
+            </button>
+            <button
+              type="button"
+              disabled={generatingPdf || preparingPrint}
+              onClick={() => handleDownloadSidePng('back')}
+              className="inline-flex items-center gap-1.5 px-3 py-2.5 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold disabled:opacity-50"
+            >
+              <ImageIcon className="h-4 w-4 text-emerald-600" />
+              <span>Back PNG</span>
             </button>
             <button
               type="button"
@@ -1861,10 +1910,28 @@ export const AdminOrderDetailPage: React.FC = () => {
                       type="button"
                       disabled={generatingPdf}
                       onClick={() => handleDownloadPdf(false)}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#0B1D3A] text-white rounded-lg font-semibold"
+                      className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#0B1D3A] text-white rounded-lg font-semibold disabled:opacity-50"
                     >
                       <PrinterIcon className="h-3.5 w-3.5" />
-                      <span>300 DPI Print PDF</span>
+                      <span>Download PDF</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={generatingPdf}
+                      onClick={() => handleDownloadSidePng('front')}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      <ImageIcon className="h-3.5 w-3.5 text-[#1D4ED8]" />
+                      <span>Front PNG</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={generatingPdf}
+                      onClick={() => handleDownloadSidePng('back')}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      <ImageIcon className="h-3.5 w-3.5 text-emerald-600" />
+                      <span>Back PNG</span>
                     </button>
                     <a
                       href={qr.pngDataUrl}
@@ -3562,6 +3629,41 @@ export const AdminApprovedDesignsPage: React.FC = () => {
     }
   };
 
+  const handleQuickDownloadExistingOrderPng = async (
+    d: CardDesignRecord,
+    ord: OrderRecord,
+    prof: ProfileRecord | undefined,
+    side: 'front' | 'back'
+  ) => {
+    if (!userRecord) return;
+    try {
+      const qrDoc = await ensureOrderQrArtifact({
+        order: ord,
+        profileSlug: prof?.slug || ord.profileSlug,
+        actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+      });
+      if (!qrDoc.pngDataUrl) return;
+      const png = await generateCardSidePngBlob({
+        design: d,
+        side,
+        info: prof?.personalInformation || {
+          fullName: ord.shippingAddress.fullName,
+          mobile: ord.shippingAddress.mobile,
+          email: ord.shippingAddress.email,
+        },
+        qrPngDataUrl: qrDoc.pngDataUrl,
+      });
+      downloadBlob(png.blob, `${ord.orderNumber}-${side}.png`);
+      notify(
+        `${side === 'front' ? 'Front' : 'Back'} PNG downloaded`,
+        `${ord.orderNumber} (${png.widthPx} × ${png.heightPx} px)`,
+        'success'
+      );
+    } catch (err) {
+      notify('PNG export failed', err instanceof Error ? err.message : 'Unable to build PNG.', 'error');
+    }
+  };
+
   const handleDeleteDesign = async (d: CardDesignRecord, ownerLabel: string) => {
     if (!userRecord) return;
     const ok = await confirmAction({
@@ -3677,11 +3779,29 @@ export const AdminApprovedDesignsPage: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => handleQuickDownloadExistingOrderPdf(d, linkedOrder, prof)}
-                            title="Download 300 DPI Print PDF"
+                            title="Download PDF"
                             className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg text-xs font-semibold"
                           >
                             <Download className="h-3.5 w-3.5" />
-                            <span>300 DPI PDF</span>
+                            <span>Download PDF</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickDownloadExistingOrderPng(d, linkedOrder, prof, 'front')}
+                            title="Download Front PNG"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg text-xs font-semibold"
+                          >
+                            <ImageIcon className="h-3.5 w-3.5 text-[#1D4ED8]" />
+                            <span>Front PNG</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickDownloadExistingOrderPng(d, linkedOrder, prof, 'back')}
+                            title="Download Back PNG"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg text-xs font-semibold"
+                          >
+                            <ImageIcon className="h-3.5 w-3.5 text-emerald-600" />
+                            <span>Back PNG</span>
                           </button>
                         </>
                       )}
@@ -3806,7 +3926,41 @@ export const AdminApprovedDesignsPage: React.FC = () => {
                     className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-[#0B1D3A] hover:bg-[#132A52] text-white text-xs font-semibold rounded-xl"
                   >
                     <Download className="h-4 w-4" />
-                    <span>Download 300 DPI Print PDF</span>
+                    <span>Download PDF</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!printResult.qrRecord.pngDataUrl) return;
+                      const png = await generateCardSidePngBlob({
+                        design: printResult.design,
+                        side: 'front',
+                        info: printResult.info,
+                        qrPngDataUrl: printResult.qrRecord.pngDataUrl,
+                      });
+                      downloadBlob(png.blob, `${printResult.orderNumber}-front.png`);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2.5 border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-semibold rounded-xl"
+                  >
+                    <ImageIcon className="h-4 w-4 text-[#1D4ED8]" />
+                    <span>Front PNG</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!printResult.qrRecord.pngDataUrl) return;
+                      const png = await generateCardSidePngBlob({
+                        design: printResult.design,
+                        side: 'back',
+                        info: printResult.info,
+                        qrPngDataUrl: printResult.qrRecord.pngDataUrl,
+                      });
+                      downloadBlob(png.blob, `${printResult.orderNumber}-back.png`);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2.5 border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-semibold rounded-xl"
+                  >
+                    <ImageIcon className="h-4 w-4 text-emerald-600" />
+                    <span>Back PNG</span>
                   </button>
                   <button
                     type="button"

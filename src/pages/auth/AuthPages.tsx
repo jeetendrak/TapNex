@@ -101,13 +101,13 @@ export const LoginPage: React.FC = () => {
     <PublicLayout>
       <div className="min-h-[calc(100vh-12rem)] flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl p-7 sm:p-8 shadow-xs">
-          <div className="mb-5">
-            <img src={TAPNEX_LOGO_URL} alt="TapNex — Smart Connections. One Tap." className="h-14 sm:h-16 w-auto object-contain" />
+          <div className="mb-5 text-center">
+            <img src={TAPNEX_LOGO_URL} alt="TapNex — Smart Connections. One Tap." className="h-14 sm:h-16 w-auto mx-auto object-contain" />
+            <h1 className="mt-4 font-display text-2xl font-bold text-[#0B1D3A]">Sign in to TapNex</h1>
+            <p className="mt-1.5 text-sm text-slate-600">
+              Access your Customer, Printer, or Administration workspace.
+            </p>
           </div>
-          <h1 className="font-display text-2xl font-bold text-[#0B1D3A]">Sign in to TapNex</h1>
-          <p className="mt-1.5 text-sm text-slate-600">
-            Access your Customer, Printer, or Administration workspace.
-          </p>
 
           {errorMsg && (
             <div className="mt-4 p-3.5 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-start gap-2">
@@ -234,13 +234,13 @@ export const RegisterPage: React.FC = () => {
     <PublicLayout>
       <div className="min-h-[calc(100vh-12rem)] flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl p-7 sm:p-8 shadow-xs">
-          <div className="mb-5">
-            <img src={TAPNEX_LOGO_URL} alt="TapNex — Smart Connections. One Tap." className="h-14 sm:h-16 w-auto object-contain" />
+          <div className="mb-5 text-center">
+            <img src={TAPNEX_LOGO_URL} alt="TapNex — Smart Connections. One Tap." className="h-14 sm:h-16 w-auto mx-auto object-contain" />
+            <h1 className="mt-4 font-display text-2xl font-bold text-[#0B1D3A]">Create your TapNex account</h1>
+            <p className="mt-1.5 text-sm text-slate-600">
+              Build your digital profile and design your 85.6 × 54 mm SMART business card.
+            </p>
           </div>
-          <h1 className="font-display text-2xl font-bold text-[#0B1D3A]">Create your TapNex account</h1>
-          <p className="mt-1.5 text-sm text-slate-600">
-            Build your digital profile and design your 85.6 × 54 mm SMART business card.
-          </p>
 
           {errorMsg && (
             <div className="mt-4 p-3.5 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800">
@@ -342,11 +342,14 @@ export const ForgotPasswordPage: React.FC = () => {
     <PublicLayout>
       <div className="min-h-[calc(100vh-12rem)] flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl p-7 shadow-xs">
-          <Lock className="h-7 w-7 text-[#1D4ED8] mb-3" />
-          <h1 className="font-display text-2xl font-bold text-[#0B1D3A]">Reset Password</h1>
-          <p className="mt-1.5 text-sm text-slate-600">
-            Enter your registered email address to receive a Firebase password reset link.
-          </p>
+          <div className="text-center">
+            <img src={TAPNEX_LOGO_URL} alt="TapNex — Smart Connections. One Tap." className="h-12 w-auto mx-auto mb-4 object-contain" />
+            <Lock className="h-7 w-7 text-[#1D4ED8] mx-auto mb-2.5" />
+            <h1 className="font-display text-2xl font-bold text-[#0B1D3A]">Reset Password</h1>
+            <p className="mt-1.5 text-sm text-slate-600">
+              Enter your registered email address to receive a Firebase password reset link.
+            </p>
+          </div>
           {sent ? (
             <div className="mt-5 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-sm text-emerald-900">
               Password reset instructions have been sent to <strong>{email}</strong>.
