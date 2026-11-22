@@ -1,0 +1,3237 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+} from 'recharts';
+import {
+  Download,
+  Plus,
+  Search,
+  Trash2,
+  Printer as PrinterIcon,
+  ExternalLink,
+  Power,
+  Pencil,
+  Filter,
+  RotateCcw,
+  X,
+  RefreshCw,
+  Upload,
+  Image as ImageIcon,
+  Sparkles,
+  Send,
+  CheckCircle2,
+  Truck,
+  QrCode,
+  FileText,
+  ArrowRight,
+} from 'lucide-react';
+import { PortalLayout } from '../../components/PortalLayout';
+import { CardCanvasPreview } from '../../components/CardCanvasPreview';
+import { TemplateVisualEditorModal } from '../../components/TemplateVisualEditorModal';
+import { FulfilmentTimeline } from '../../components/FulfilmentTimeline';
+import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../../contexts/ToastContext';
+import {
+  adminToggleProfileStatus,
+  createManagedUserRecord,
+  deleteCardDesign,
+  deleteCardTemplate,
+  deleteDigitalProfile,
+  dispatchOrderWithCourier,
+  ensureOrderQrArtifact,
+  filterAuditLogs,
+  formatTimestampDate,
+  getAllCardDesigns,
+  getAllOrders,
+  getAllPayments,
+  getAllPrinters,
+  getAllProfiles,
+  getAllQrCodes,
+  getAllShippingRecords,
+  getAllUsers,
+  getAuditLogs,
+  getCardDesignById,
+  getCardTemplates,
+  getEmailTemplates,
+  getOrderById,
+  getProfileById,
+  getQrCodeById,
+  getSupportTickets,
+  getUserById,
+  getUserProfiles,
+  saveCardTemplate,
+  saveEmailTemplate,
+  savePrinterRecord,
+  sendAndLogTransactionalEmail,
+  sendApprovedDesignToPrint,
+  updateOrderAndPaymentStatus,
+  updateOrderWorkflow,
+  updateSupportTicket,
+  updateUserRoleAndStatus,
+  type AuditLogPreset,
+} from '../../lib/firestoreService';
+import { exportRowsToCsv, exportRowsToExcel } from '../../lib/exportUtils';
+import { downloadBlob, generatePrintReadyPdfBlob } from '../../lib/printPdf';
+import { compressImageFileToDataUrl, generatePrinterAuthId } from '../../lib/qrArtwork';
+import { DEFAULT_CARD_TEMPLATES, INDIAN_STATES, ORDER_STATUS_FLOW } from '../../lib/constants';
+import type {
+  AuditLogRecord,
+  CardDesignRecord,
+  CardTemplateRecord,
+  EmailTemplateRecord,
+  OrderRecord,
+  OrderStatus,
+  PaymentRecord,
+  PaymentStatus,
+  PersonalInformation,
+  PrinterRecord,
+  ProfileRecord,
+  QrCodeRecord,
+  ShippingAddress,
+  ShippingRecord,
+  SupportTicketRecord,
+  UserRecord,
+  UserRole,
+  UserStatus,
+} from '../../types';
+
+const PAYMENT_STATUS_OPTIONS: PaymentStatus[] = ['Pending', 'Completed', 'Verified', 'Rejected', 'Failed', 'Refunded'];
+
+const CHART_COLORS = ['#0B1D3A', '#1D4ED8', '#06B6D4', '#16A34A', '#D97706', '#64748B'];
+
+// 1. Admin Dashboard with Analytics Charts
+export const AdminDashboardPage: React.FC = () => {
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [printers, setPrinters] = useState<PrinterRecord[]>([]);
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([getAllUsers(), getAllOrders(), getAllPrinters(), getAllPayments()])
+      .then(([u, o, p, pay]) => {
+        setUsers(u);
+        setOrders(o);
+        setPrinters(p);
+        setPayments(pay);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const totalRevenue = orders
+    .filter((o) => o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed')
+    .reduce((acc, o) => acc + (o.total || 0), 0);
+
+  const statusCounts = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const o of orders) {
+      map[o.orderStatus] = (map[o.orderStatus] || 0) + 1;
+    }
+    return Object.entries(map).map(([name, value]) => ({ name, value }));
+  }, [orders]);
+
+  const revenueByCardType = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const o of orders) {
+      const k = o.cardType || 'Standard NFC';
+      map[k] = (map[k] || 0) + (o.total || 0);
+    }
+    return Object.entries(map).map(([name, revenue]) => ({ name, revenue }));
+  }, [orders]);
+
+  const metrics = [
+    { label: 'Total Registered Users', value: users.length },
+    { label: 'Active Users', value: users.filter((u) => u.status === 'Active').length },
+    { label: 'Blocked Users', value: users.filter((u) => u.status === 'Blocked').length },
+    { label: 'Print Partners', value: printers.length },
+    { label: 'Total Orders', value: orders.length },
+    { label: 'Pending Orders', value: orders.filter((o) => !['Delivered', 'Cancelled', 'Refunded'].includes(o.orderStatus)).length },
+    { label: 'Completed Orders', value: orders.filter((o) => o.orderStatus === 'Delivered').length },
+    { label: 'Verified Revenue (INR)', value: `₹${totalRevenue.toLocaleString('en-IN')}` },
+    { label: 'Pending Payments', value: orders.filter((o) => o.paymentStatus === 'Pending').length || payments.filter((p) => p.status === 'Created').length },
+  ];
+
+  return (
+    <PortalLayout portal="admin" title="Admin Operations Dashboard">
+      <div className="space-y-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+          {metrics.map((m) => (
+            <div key={m.label} className="bg-white border border-slate-200 rounded-xl p-4">
+              <div className="text-xs text-slate-500">{m.label}</div>
+              <div className="mt-1.5 font-display text-xl font-bold text-[#0B1D3A] tabular-nums">
+                {loading ? '—' : m.value}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6">
+            <h2 className="font-display font-bold text-sm text-[#0B1D3A] mb-4">Revenue by Card Finish (INR)</h2>
+            <div className="h-64">
+              {revenueByCardType.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-xs text-slate-400">No order revenue yet</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={revenueByCardType}>
+                    <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} />
+                    <Tooltip />
+                    <Bar dataKey="revenue" fill="#1D4ED8" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-6">
+            <h2 className="font-display font-bold text-sm text-[#0B1D3A] mb-4">Order Status Distribution</h2>
+            <div className="h-64">
+              {statusCounts.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-xs text-slate-400">No orders yet</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={statusCounts} dataKey="value" nameKey="name" outerRadius={85} label>
+                      {statusCounts.map((_, idx) => (
+                        <Cell key={idx} fill={CHART_COLORS[idx % CHART_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-2xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-display font-bold text-sm text-[#0B1D3A]">Recent Orders</h2>
+            <Link to="/admin/orders" className="text-xs font-semibold text-[#1D4ED8] hover:underline">
+              View All Orders →
+            </Link>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-slate-500 border-b border-slate-200">
+                <tr>
+                  <th className="py-2.5 px-3">Order #</th>
+                  <th className="py-2.5 px-3">Customer</th>
+                  <th className="py-2.5 px-3">Total</th>
+                  <th className="py-2.5 px-3">Payment</th>
+                  <th className="py-2.5 px-3">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {orders.slice(0, 6).map((o) => (
+                  <tr key={o.orderId}>
+                    <td className="py-2.5 px-3 font-mono font-semibold">{o.orderNumber}</td>
+                    <td className="py-2.5 px-3">{o.shippingAddress.fullName}</td>
+                    <td className="py-2.5 px-3 font-mono tabular-nums">₹{o.total}</td>
+                    <td className="py-2.5 px-3">{o.paymentStatus}</td>
+                    <td className="py-2.5 px-3 font-semibold text-[#1D4ED8]">{o.orderStatus}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </PortalLayout>
+  );
+};
+
+// 2. Users Management
+export const AdminUsersPage: React.FC = () => {
+  const { userRecord } = useAuth();
+  const { notify, confirmAction } = useToast();
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState<string>('ALL');
+  const [statusFilter, setStatusFilter] = useState<string>('ALL');
+
+  const [newUid, setNewUid] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newRole, setNewRole] = useState<UserRole>('USER');
+
+  const load = () => getAllUsers().then(setUsers);
+  useEffect(() => {
+    load();
+  }, []);
+
+  const filtered = users.filter((u) => {
+    const q = search.toLowerCase();
+    const matchText =
+      !q ||
+      u.email.toLowerCase().includes(q) ||
+      (u.displayName || '').toLowerCase().includes(q) ||
+      u.uid.toLowerCase().includes(q);
+    const matchRole = roleFilter === 'ALL' || u.role === roleFilter;
+    const matchStatus = statusFilter === 'ALL' || u.status === statusFilter;
+    return matchText && matchRole && matchStatus;
+  });
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userRecord) return;
+    if (newRole === 'SUPERADMIN' && userRecord.role !== 'SUPERADMIN') {
+      notify('Restricted', 'Only SuperAdmin can create SuperAdmin accounts.', 'error');
+      return;
+    }
+    const uid = newUid.trim() || `usr_${Date.now()}`;
+    await createManagedUserRecord({
+      uid,
+      email: newEmail.trim(),
+      displayName: newName.trim(),
+      role: newRole,
+      status: 'Active',
+      actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+    });
+    setNewUid('');
+    setNewEmail('');
+    setNewName('');
+    load();
+    notify('User record created', `${newEmail} (${newRole})`, 'success');
+  };
+
+  const handleRoleStatus = async (target: UserRecord, role: UserRole, status: UserStatus) => {
+    if (!userRecord) return;
+    if ((target.role === 'SUPERADMIN' || role === 'SUPERADMIN') && userRecord.role !== 'SUPERADMIN') {
+      notify('Restricted', 'Only SuperAdmin can modify SuperAdmin accounts.', 'error');
+      return;
+    }
+    const activeSupers = users.filter((u) => u.role === 'SUPERADMIN' && u.status === 'Active');
+    if (target.role === 'SUPERADMIN' && (role !== 'SUPERADMIN' || status !== 'Active') && activeSupers.length <= 1) {
+      notify('Protected', 'Cannot demote or block the last active SuperAdmin.', 'error');
+      return;
+    }
+    const ok = await confirmAction({
+      title: 'Update User Account',
+      message: `Set ${target.email} to Role: ${role}, Status: ${status}?`,
+      confirmLabel: 'Apply Change',
+    });
+    if (!ok) return;
+    await updateUserRoleAndStatus({
+      targetUser: target,
+      newRole: role,
+      newStatus: status,
+      actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+    });
+    load();
+    notify('Account updated', `${target.email} updated.`, 'success');
+  };
+
+  return (
+    <PortalLayout portal="admin" title="Users & Customers">
+      <div className="space-y-6">
+        <form onSubmit={handleCreate} className="bg-white border border-slate-200 rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
+          <div>
+            <label className="block text-xs text-slate-600 mb-1">Firebase UID (Optional)</label>
+            <input
+              type="text"
+              value={newUid}
+              onChange={(e) => setNewUid(e.target.value)}
+              placeholder="Auto-generated if blank"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-600 mb-1">Full Name *</label>
+            <input
+              type="text"
+              required
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-600 mb-1">Email *</label>
+            <input
+              type="email"
+              required
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-600 mb-1">Role</label>
+            <select
+              value={newRole}
+              onChange={(e) => setNewRole(e.target.value as UserRole)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+            >
+              <option value="USER">USER</option>
+              <option value="PRINTER">PRINTER</option>
+              <option value="ADMIN">ADMIN</option>
+              {userRecord?.role === 'SUPERADMIN' && <option value="SUPERADMIN">SUPERADMIN</option>}
+            </select>
+          </div>
+          <button type="submit" className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#0B1D3A] text-white rounded-lg text-xs font-semibold">
+            <Plus className="h-3.5 w-3.5" />
+            <span>Add User</span>
+          </button>
+        </form>
+
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2.5 flex-1">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="h-4 w-4 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search email, name, UID..."
+                className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-xs"
+              />
+            </div>
+            <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
+              <option value="ALL">All Roles</option>
+              <option value="USER">USER</option>
+              <option value="PRINTER">PRINTER</option>
+              <option value="ADMIN">ADMIN</option>
+              <option value="SUPERADMIN">SUPERADMIN</option>
+            </select>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
+              <option value="ALL">All Statuses</option>
+              <option value="Active">Active</option>
+              <option value="Pending Verification">Pending Verification</option>
+              <option value="Blocked">Blocked</option>
+              <option value="Disabled">Disabled</option>
+            </select>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                exportRowsToCsv(
+                  'tapnex-users.csv',
+                  filtered.map((u) => ({ uid: u.uid, email: u.email, name: u.displayName || '', role: u.role, status: u.status }))
+                )
+              }
+              className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold hover:bg-slate-50"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span>CSV</span>
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                exportRowsToExcel(
+                  'tapnex-users.xlsx',
+                  'Users',
+                  filtered.map((u) => ({ uid: u.uid, email: u.email, name: u.displayName || '', role: u.role, status: u.status }))
+                )
+              }
+              className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold hover:bg-slate-50"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span>Excel</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+              <tr>
+                <th className="py-3 px-4">User</th>
+                <th className="py-3 px-4">Role</th>
+                <th className="py-3 px-4">Status</th>
+                <th className="py-3 px-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filtered.map((u) => (
+                <tr key={u.uid}>
+                  <td className="py-3 px-4">
+                    <Link to={`/admin/users/${u.uid}`} className="font-semibold text-[#0B1D3A] hover:underline">
+                      {u.displayName || u.username || u.email}
+                    </Link>
+                    <div className="text-slate-500">{u.email}</div>
+                  </td>
+                  <td className="py-3 px-4">
+                    <select
+                      value={u.role}
+                      disabled={u.role === 'SUPERADMIN' && userRecord?.role !== 'SUPERADMIN'}
+                      onChange={(e) => handleRoleStatus(u, e.target.value as UserRole, u.status)}
+                      className="px-2 py-1 border border-slate-300 rounded bg-white text-xs"
+                    >
+                      <option value="USER">USER</option>
+                      <option value="PRINTER">PRINTER</option>
+                      <option value="ADMIN">ADMIN</option>
+                      {userRecord?.role === 'SUPERADMIN' && <option value="SUPERADMIN">SUPERADMIN</option>}
+                    </select>
+                  </td>
+                  <td className="py-3 px-4">
+                    <select
+                      value={u.status}
+                      onChange={(e) => handleRoleStatus(u, u.role, e.target.value as UserStatus)}
+                      className="px-2 py-1 border border-slate-300 rounded bg-white text-xs"
+                    >
+                      <option value="Active">Active</option>
+                      <option value="Pending Verification">Pending Verification</option>
+                      <option value="Blocked">Blocked</option>
+                      <option value="Disabled">Disabled</option>
+                    </select>
+                  </td>
+                  <td className="py-3 px-4 text-right">
+                    <Link to={`/admin/users/${u.uid}`} className="text-[#1D4ED8] font-semibold hover:underline">
+                      Inspect
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </PortalLayout>
+  );
+};
+
+export const AdminUserDetailPage: React.FC = () => {
+  const { uid } = useParams<{ uid: string }>();
+  const { userRecord, requestPasswordReset, appSettings } = useAuth();
+  const { notify, confirmAction } = useToast();
+  const [user, setUser] = useState<UserRecord | null>(null);
+  const [profiles, setProfiles] = useState<ProfileRecord[]>([]);
+
+  const load = () => {
+    if (!uid) return;
+    getUserById(uid).then(setUser);
+    getUserProfiles(uid).then(setProfiles);
+  };
+
+  useEffect(() => {
+    load();
+  }, [uid]);
+
+  return (
+    <PortalLayout portal="admin" title="User Account Detail">
+      {!user ? (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 text-sm text-slate-500">Loading user...</div>
+      ) : (
+        <div className="space-y-6 max-w-3xl">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+            <h2 className="font-display text-xl font-bold text-[#0B1D3A]">{user.displayName || user.email}</h2>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div><span className="text-xs text-slate-500 block">UID</span><span className="font-mono text-xs">{user.uid}</span></div>
+              <div><span className="text-xs text-slate-500 block">Email</span><span>{user.email}</span></div>
+              <div><span className="text-xs text-slate-500 block">Role</span><span className="font-semibold">{user.role}</span></div>
+              <div><span className="text-xs text-slate-500 block">Status</span><span className="font-semibold">{user.status}</span></div>
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                await requestPasswordReset(user.email);
+                notify('Password reset triggered', `Sent Firebase password reset email to ${user.email}.`, 'success');
+              }}
+              className="px-4 py-2 bg-[#0B1D3A] text-white text-xs font-semibold rounded-lg"
+            >
+              Send Secure Password Reset Email
+            </button>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+            <h3 className="font-display font-bold text-base text-[#0B1D3A]">User Digital Profiles ({profiles.length})</h3>
+            {profiles.length === 0 ? (
+              <p className="text-xs text-slate-500">No digital profiles created by this user.</p>
+            ) : (
+              <div className="space-y-3">
+                {profiles.map((p) => (
+                  <div key={p.profileId} className="p-4 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <div className="font-semibold text-sm text-[#0B1D3A]">{p.profileLabel || p.personalInformation.fullName || p.slug}</div>
+                      <div className="text-xs font-mono text-slate-500">/p/{p.slug} · {p.isPublic ? 'Enabled' : 'Disabled'}</div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <a
+                        href={`/p/${p.slug}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        <span>View</span>
+                      </a>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!userRecord) return;
+                          await adminToggleProfileStatus({
+                            profile: p,
+                            isPublic: !p.isPublic,
+                            actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+                            inactiveMessage: appSettings.inactiveProfileMessage,
+                          });
+                          notify(p.isPublic ? 'Profile disabled' : 'Profile enabled', `/p/${p.slug}`, 'success');
+                          load();
+                        }}
+                        className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold hover:bg-slate-50"
+                      >
+                        {p.isPublic ? 'Disable' : 'Enable'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!userRecord) return;
+                          const ok = await confirmAction({
+                            title: 'Delete Digital Profile',
+                            message: `Permanently delete /p/${p.slug}?`,
+                            destructive: true,
+                            confirmLabel: 'Delete',
+                          });
+                          if (!ok) return;
+                          await deleteDigitalProfile({
+                            profile: p,
+                            actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+                          });
+                          notify('Digital profile deleted', `/p/${p.slug}`, 'success');
+                          load();
+                        }}
+                        className="px-3 py-1.5 border border-rose-200 text-rose-600 rounded-lg text-xs font-semibold hover:bg-rose-50"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </PortalLayout>
+  );
+};
+
+// 3. Printers Management
+export const AdminPrintersPage: React.FC = () => {
+  const { userRecord } = useAuth();
+  const { notify } = useToast();
+  const [printers, setPrinters] = useState<PrinterRecord[]>([]);
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [uidInput, setUidInput] = useState(() => generatePrinterAuthId());
+  const [businessName, setBusinessName] = useState('');
+  const [contactPerson, setContactPerson] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+
+  const load = () => Promise.all([getAllPrinters(), getAllOrders()]).then(([p, o]) => { setPrinters(p); setOrders(o); });
+  useEffect(() => { load(); }, []);
+
+  const handleAddPrinter = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userRecord) return;
+    const pid = uidInput.trim() || generatePrinterAuthId();
+    await savePrinterRecord(
+      {
+        printerId: pid,
+        uid: pid,
+        businessName,
+        contactPerson,
+        email,
+        phone,
+        status: 'Active',
+        serviceAreas: ['All India'],
+      },
+      { uid: userRecord.uid, email: userRecord.email, role: userRecord.role }
+    );
+    setUidInput(generatePrinterAuthId());
+    setBusinessName('');
+    setContactPerson('');
+    setEmail('');
+    setPhone('');
+    load();
+    notify('Printer saved', `${businessName} (${pid})`, 'success');
+  };
+
+  return (
+    <PortalLayout portal="admin" title="Print Partners Management">
+      <div className="space-y-6">
+        <form onSubmit={handleAddPrinter} className="bg-white border border-slate-200 rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">
+              Print Auth ID (Auto-Generated)
+            </label>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                required
+                value={uidInput}
+                onChange={(e) => setUidInput(e.target.value)}
+                placeholder="prt_auto_id"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-slate-50"
+              />
+              <button
+                type="button"
+                onClick={() => setUidInput(generatePrinterAuthId())}
+                title="Regenerate Print Auth ID"
+                className="p-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-100 shrink-0"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Press Business Name *</label>
+            <input type="text" required value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="Press Business Name *" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" />
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Contact Person *</label>
+            <input type="text" required value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} placeholder="Contact Person *" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" />
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Email *</label>
+            <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email *" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs" />
+          </div>
+          <button type="submit" className="px-4 py-2 bg-[#0B1D3A] hover:bg-[#132A52] text-white rounded-lg text-xs font-semibold h-[34px]">Add Printer</button>
+        </form>
+
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+              <tr>
+                <th className="py-3 px-4">Facility</th>
+                <th className="py-3 px-4">Contact</th>
+                <th className="py-3 px-4">Assigned Jobs</th>
+                <th className="py-3 px-4">Dispatched</th>
+                <th className="py-3 px-4">Status</th>
+                <th className="py-3 px-4 text-right">Toggle</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {printers.map((p) => {
+                const pOrders = orders.filter((o) => o.printerId === p.printerId);
+                const done = pOrders.filter((o) => ['Dispatched', 'In Transit', 'Delivered'].includes(o.orderStatus)).length;
+                return (
+                  <tr key={p.printerId}>
+                    <td className="py-3 px-4 font-semibold text-[#0B1D3A]">{p.businessName}<div className="font-mono text-[11px] text-slate-400">{p.printerId}</div></td>
+                    <td className="py-3 px-4">{p.contactPerson}<div className="text-slate-500">{p.email}</div></td>
+                    <td className="py-3 px-4 font-mono tabular-nums">{pOrders.length}</td>
+                    <td className="py-3 px-4 font-mono tabular-nums">{done}</td>
+                    <td className="py-3 px-4 font-semibold">{p.status}</td>
+                    <td className="py-3 px-4 text-right">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!userRecord) return;
+                          await savePrinterRecord(
+                            { ...p, status: p.status === 'Active' ? 'Blocked' : 'Active' },
+                            { uid: userRecord.uid, email: userRecord.email, role: userRecord.role }
+                          );
+                          load();
+                        }}
+                        className="px-3 py-1 border border-slate-300 rounded text-xs font-medium hover:bg-slate-50"
+                      >
+                        {p.status === 'Active' ? 'Block' : 'Activate'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </PortalLayout>
+  );
+};
+
+// 4. Orders & Payment Status Dashboard
+export const AdminOrdersPage: React.FC = () => {
+  const { userRecord } = useAuth();
+  const { notify } = useToast();
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [paymentFilter, setPaymentFilter] = useState('ALL');
+
+  const load = () => getAllOrders().then(setOrders);
+  useEffect(() => { load(); }, []);
+
+  const filtered = orders.filter((o) => {
+    const q = search.toLowerCase();
+    const matchText =
+      !q ||
+      o.orderNumber.toLowerCase().includes(q) ||
+      o.shippingAddress.fullName.toLowerCase().includes(q) ||
+      (o.profileSlug || '').toLowerCase().includes(q);
+    const matchStatus = statusFilter === 'ALL' || o.orderStatus === statusFilter;
+    const matchPayment = paymentFilter === 'ALL' || o.paymentStatus === paymentFilter;
+    return matchText && matchStatus && matchPayment;
+  });
+
+  const pendingPayCount = orders.filter((o) => o.paymentStatus === 'Pending').length;
+  const completedPayCount = orders.filter((o) => o.paymentStatus === 'Completed' || o.paymentStatus === 'Verified').length;
+  const rejectedPayCount = orders.filter((o) => ['Rejected', 'Failed', 'Refunded'].includes(o.paymentStatus)).length;
+  const confirmedRev = orders
+    .filter((o) => o.paymentStatus === 'Completed' || o.paymentStatus === 'Verified')
+    .reduce((acc, o) => acc + (o.total || 0), 0);
+
+  return (
+    <PortalLayout portal="admin" title="Orders & Payment Status Dashboard">
+      <div className="space-y-5">
+        {/* Payment & Order KPIs */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white border border-slate-200 rounded-xl p-4">
+            <div className="text-xs text-slate-500">Total Orders</div>
+            <div className="mt-1 font-display text-xl font-bold text-[#0B1D3A] tabular-nums">{orders.length}</div>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-xl p-4">
+            <div className="text-xs text-slate-500">Payment Pending</div>
+            <div className="mt-1 font-display text-xl font-bold text-amber-600 tabular-nums">{pendingPayCount}</div>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-xl p-4">
+            <div className="text-xs text-slate-500">Completed / Verified</div>
+            <div className="mt-1 font-display text-xl font-bold text-emerald-700 tabular-nums">
+              {completedPayCount} (₹{confirmedRev.toLocaleString('en-IN')})
+            </div>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-xl p-4">
+            <div className="text-xs text-slate-500">Rejected / Failed / Refunded</div>
+            <div className="mt-1 font-display text-xl font-bold text-rose-700 tabular-nums">{rejectedPayCount}</div>
+          </div>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-wrap gap-3 items-center justify-between">
+          <div className="flex flex-wrap gap-2.5 flex-1">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search order #, customer, slug..."
+              className="px-3 py-2 border border-slate-300 rounded-lg text-xs min-w-[200px]"
+            />
+            <select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
+              <option value="ALL">All Payment Statuses</option>
+              {PAYMENT_STATUS_OPTIONS.map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white">
+              <option value="ALL">All Order Statuses</option>
+              {[...ORDER_STATUS_FLOW, 'Cancelled', 'Refunded'].map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              exportRowsToExcel(
+                'tapnex-orders.xlsx',
+                'Orders',
+                filtered.map((o) => ({
+                  orderNumber: o.orderNumber,
+                  customer: o.shippingAddress.fullName,
+                  city: o.shippingAddress.city,
+                  total: o.total,
+                  paymentStatus: o.paymentStatus,
+                  orderStatus: o.orderStatus,
+                  printerId: o.printerId || '',
+                }))
+              )
+            }
+            className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold"
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span>Export Excel</span>
+          </button>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+              <tr>
+                <th className="py-3 px-4">Order #</th>
+                <th className="py-3 px-4">Customer</th>
+                <th className="py-3 px-4">Total</th>
+                <th className="py-3 px-4">Payment Status</th>
+                <th className="py-3 px-4">Printer</th>
+                <th className="py-3 px-4">Order Status</th>
+                <th className="py-3 px-4 text-right">Manage</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filtered.map((o) => (
+                <tr key={o.orderId}>
+                  <td className="py-3 px-4 font-mono font-semibold text-[#0B1D3A]">
+                    {o.orderNumber}
+                    {o.profileSlug && <div className="text-[11px] font-normal text-slate-400">/p/{o.profileSlug}</div>}
+                  </td>
+                  <td className="py-3 px-4">{o.shippingAddress.fullName}</td>
+                  <td className="py-3 px-4 font-mono tabular-nums">₹{o.total}</td>
+                  <td className="py-3 px-4">
+                    <select
+                      value={o.paymentStatus}
+                      onChange={async (e) => {
+                        if (!userRecord) return;
+                        const nextPay = e.target.value as PaymentStatus;
+                        const suggestedOrderStatus: OrderStatus =
+                          nextPay === 'Completed' || nextPay === 'Verified'
+                            ? o.orderStatus === 'Awaiting Payment'
+                              ? 'Payment Successful'
+                              : o.orderStatus
+                            : nextPay === 'Refunded'
+                              ? 'Refunded'
+                              : nextPay === 'Rejected'
+                                ? 'Cancelled'
+                                : o.orderStatus;
+                        await updateOrderAndPaymentStatus({
+                          order: o,
+                          paymentStatus: nextPay,
+                          orderStatus: suggestedOrderStatus,
+                          actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+                        });
+                        notify('Payment status updated', `${o.orderNumber} -> ${nextPay}`, 'success');
+                        load();
+                      }}
+                      className="px-2 py-1 border border-slate-300 rounded bg-white text-xs font-semibold"
+                    >
+                      {PAYMENT_STATUS_OPTIONS.map((p) => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="py-3 px-4 font-mono text-[11px]">
+                    {o.printerId === 'admin_inhouse'
+                      ? 'In-House (Admin)'
+                      : o.printerId || 'Unassigned'}
+                  </td>
+                  <td className="py-3 px-4">
+                    <div className="font-semibold text-[#1D4ED8]">{o.orderStatus}</div>
+                    {ORDER_STATUS_FLOW.includes(o.orderStatus) && (
+                      <div className="text-[10px] font-mono text-slate-400">
+                        Step {ORDER_STATUS_FLOW.indexOf(o.orderStatus) + 1}/{ORDER_STATUS_FLOW.length}
+                      </div>
+                    )}
+                  </td>
+                  <td className="py-3 px-4 text-right whitespace-nowrap">
+                    <Link to={`/admin/orders/${o.orderId}`} className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#0B1D3A] hover:bg-[#132A52] text-white rounded-lg text-xs font-semibold">
+                      <span>Fulfil / Timeline</span>
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </PortalLayout>
+  );
+};
+
+export const AdminOrderDetailPage: React.FC = () => {
+  const { orderId } = useParams<{ orderId: string }>();
+  const { userRecord } = useAuth();
+  const { notify, confirmAction } = useToast();
+  const [order, setOrder] = useState<OrderRecord | null>(null);
+  const [design, setDesign] = useState<CardDesignRecord | null>(null);
+  const [profile, setProfile] = useState<ProfileRecord | null>(null);
+  const [printers, setPrinters] = useState<PrinterRecord[]>([]);
+  const [qr, setQr] = useState<QrCodeRecord | null>(null);
+  const [selectedPrinter, setSelectedPrinter] = useState('');
+  const [notes, setNotes] = useState('');
+  const [updatingWorkflow, setUpdatingWorkflow] = useState(false);
+  const [preparingPrint, setPreparingPrint] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
+
+  // Admin In-House / Direct Courier Dispatch State
+  const [showDispatchForm, setShowDispatchForm] = useState(false);
+  const [courierName, setCourierName] = useState('');
+  const [trackingNumber, setTrackingNumber] = useState('');
+  const [trackingUrl, setTrackingUrl] = useState('');
+  const [dispatchDate, setDispatchDate] = useState(new Date().toISOString().slice(0, 10));
+
+  const load = async () => {
+    if (!orderId) return;
+    const [ord, prts] = await Promise.all([getOrderById(orderId), getAllPrinters()]);
+    setOrder(ord);
+    setPrinters(prts);
+    if (ord) {
+      setSelectedPrinter(ord.printerId || 'admin_inhouse');
+      setNotes(ord.internalNotes || '');
+      setCourierName(ord.courierName || '');
+      setTrackingNumber(ord.trackingNumber || '');
+      setTrackingUrl(ord.trackingUrl || '');
+      if (ord.dispatchDate) setDispatchDate(ord.dispatchDate);
+
+      const [des, prof, qrDoc] = await Promise.all([
+        getCardDesignById(ord.designId),
+        getProfileById(ord.profileId),
+        ord.qrCodeId ? getQrCodeById(ord.qrCodeId) : Promise.resolve(null),
+      ]);
+      setDesign(des);
+      setProfile(prof);
+      setQr(qrDoc);
+    }
+  };
+  useEffect(() => { load(); }, [orderId]);
+
+  if (!order) {
+    return (
+      <PortalLayout portal="admin" title="Order Detail">
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 text-sm text-slate-500">Loading order...</div>
+      </PortalLayout>
+    );
+  }
+
+  const cardPersonalInfo: Partial<PersonalInformation> = {
+    ...(profile?.personalInformation || {}),
+    fullName: profile?.personalInformation?.fullName || order.shippingAddress.fullName,
+    mobile: profile?.personalInformation?.mobile || order.shippingAddress.mobile,
+    email: profile?.personalInformation?.email || order.shippingAddress.email,
+  };
+
+  const assignedPrinterObj = printers.find((p) => p.printerId === order.printerId);
+  const printerLabel =
+    order.printerId === 'admin_inhouse'
+      ? 'In-House Print Press (Admin)'
+      : assignedPrinterObj
+        ? assignedPrinterObj.businessName
+        : order.printerId || 'Unassigned';
+
+  const handleTimelineStatusSelect = async (nextStatus: OrderStatus) => {
+    if (!userRecord || updatingWorkflow) return;
+    setUpdatingWorkflow(true);
+    try {
+      await updateOrderWorkflow({
+        orderId: order.orderId,
+        updates: { orderStatus: nextStatus },
+        actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+        auditAction: 'ADMIN_TIMELINE_STEP',
+        auditDetails: `Order ${order.orderNumber} progressed to ${nextStatus}`,
+      });
+      if (nextStatus === 'Printing in Progress') {
+        await sendAndLogTransactionalEmail({
+          uid: order.uid,
+          to: order.shippingAddress.email,
+          templateId: 'printing_started',
+          variables: { ORDER_NUMBER: order.orderNumber },
+        });
+      } else if (nextStatus === 'Delivered') {
+        await sendAndLogTransactionalEmail({
+          uid: order.uid,
+          to: order.shippingAddress.email,
+          templateId: 'delivered',
+          variables: { ORDER_NUMBER: order.orderNumber },
+        });
+      }
+      notify('Fulfilment updated', `${order.orderNumber} → ${nextStatus}`, 'success');
+      await load();
+    } finally {
+      setUpdatingWorkflow(false);
+    }
+  };
+
+  const handlePrepareQrAndPrint = async (): Promise<QrCodeRecord | null> => {
+    if (!userRecord) return null;
+    setPreparingPrint(true);
+    try {
+      const preparedQr = await ensureOrderQrArtifact({
+        order,
+        profileSlug: profile?.slug || order.profileSlug,
+        actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+      });
+      setQr(preparedQr);
+      notify('Print files ready', 'Verified high-resolution QR code generated and attached.', 'success');
+      await load();
+      return preparedQr;
+    } catch (err) {
+      notify('QR preparation failed', err instanceof Error ? err.message : 'Unable to prepare QR.', 'error');
+      return null;
+    } finally {
+      setPreparingPrint(false);
+    }
+  };
+
+  const handleDownloadPdf = async (withGuides: boolean) => {
+    if (!design) {
+      notify('Missing card design', 'Linked card design could not be loaded.', 'error');
+      return;
+    }
+    setGeneratingPdf(true);
+    try {
+      let activeQr = qr;
+      if (!activeQr?.pngDataUrl) {
+        activeQr = await handlePrepareQrAndPrint();
+      }
+      if (!activeQr?.pngDataUrl) return;
+      const res = await generatePrintReadyPdfBlob({
+        design,
+        info: cardPersonalInfo,
+        qrPngDataUrl: activeQr.pngDataUrl,
+        includeProofGuides: withGuides,
+      });
+      downloadBlob(res.blob, `${order.orderNumber}-${withGuides ? 'proof' : '300dpi-print'}.pdf`);
+      notify('Print PDF downloaded', `${res.specs.trimMm} + ${res.specs.bleedMm} bleed @ ${res.specs.dpi} DPI`, 'success');
+    } catch (err) {
+      notify('PDF generation failed', err instanceof Error ? err.message : 'Unable to generate PDF.', 'error');
+    } finally {
+      setGeneratingPdf(false);
+    }
+  };
+
+  const handleAdminDispatch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userRecord) return;
+    setUpdatingWorkflow(true);
+    try {
+      await dispatchOrderWithCourier({
+        order,
+        printerUid: order.printerId || 'admin_inhouse',
+        actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+        courierName: courierName.trim(),
+        trackingNumber: trackingNumber.trim(),
+        trackingUrl: trackingUrl.trim(),
+        dispatchDate,
+      });
+      await sendAndLogTransactionalEmail({
+        uid: order.uid,
+        to: order.shippingAddress.email,
+        templateId: 'dispatched',
+        variables: {
+          ORDER_NUMBER: order.orderNumber,
+          COURIER_NAME: courierName.trim(),
+          TRACKING_NUMBER: trackingNumber.trim(),
+        },
+      });
+      setShowDispatchForm(false);
+      notify('Order dispatched', `Courier ${courierName} (${trackingNumber}) recorded and customer notified.`, 'success');
+      await load();
+    } finally {
+      setUpdatingWorkflow(false);
+    }
+  };
+
+  return (
+    <PortalLayout portal="admin" title={`Order ${order.orderNumber}`}>
+      <div className="space-y-6">
+        {/* Top Summary + Instant 300 DPI Print Actions */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2 text-xs font-mono text-slate-500">
+              <span>{order.orderNumber}</span>
+              <span>·</span>
+              <span>Qty {order.quantity}</span>
+              <span>·</span>
+              <span>{order.cardType}</span>
+              <span>·</span>
+              <span className="font-semibold text-[#0B1D3A]">₹{order.total}</span>
+            </div>
+            <h2 className="font-display text-xl font-bold text-[#0B1D3A]">
+              {order.shippingAddress.fullName}
+            </h2>
+            <p className="text-xs text-slate-600">
+              {order.shippingAddress.email} · {order.shippingAddress.mobile} · {order.shippingAddress.city}, {order.shippingAddress.state} ({order.shippingAddress.pinCode})
+            </p>
+            {order.profileSlug && (
+              <a
+                href={`/p/${order.profileSlug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs font-mono text-[#1D4ED8] hover:underline pt-0.5"
+              >
+                <span>Public Profile: /p/{order.profileSlug}</span>
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={generatingPdf || preparingPrint}
+              onClick={() => handleDownloadPdf(false)}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-[#0B1D3A] hover:bg-[#132A52] text-white rounded-xl text-xs font-semibold disabled:opacity-50"
+            >
+              <PrinterIcon className="h-4 w-4" />
+              <span>{generatingPdf ? 'Building PDF...' : 'Download 300 DPI Print PDF'}</span>
+            </button>
+            <button
+              type="button"
+              disabled={generatingPdf || preparingPrint}
+              onClick={() => handleDownloadPdf(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold disabled:opacity-50"
+            >
+              <FileText className="h-4 w-4" />
+              <span>Proof w/ Guides</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowDispatchForm((prev) => !prev)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 border border-[#1D4ED8] text-[#1D4ED8] bg-blue-50/70 hover:bg-blue-100 rounded-xl text-xs font-semibold"
+            >
+              <Truck className="h-4 w-4" />
+              <span>{order.trackingNumber ? 'Update Courier / AWB' : 'Dispatch Order'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Interactive End-to-End 12-Step Fulfilment Timeline */}
+        <FulfilmentTimeline
+          currentStatus={order.orderStatus}
+          interactive
+          updating={updatingWorkflow}
+          printerLabel={printerLabel}
+          courierName={order.courierName}
+          trackingNumber={order.trackingNumber}
+          trackingUrl={order.trackingUrl}
+          dispatchDate={order.dispatchDate}
+          onSelectStatus={handleTimelineStatusSelect}
+          onOpenDispatchForm={() => setShowDispatchForm(true)}
+        />
+
+        {/* In-House / Admin Courier Dispatch Panel */}
+        {showDispatchForm && (
+          <form onSubmit={handleAdminDispatch} className="bg-white border border-blue-200 rounded-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 font-display font-bold text-sm text-[#0B1D3A]">
+                <Truck className="h-4 w-4 text-[#1D4ED8]" />
+                <span>Courier Dispatch & Tracking (Sets Status to Dispatched)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDispatchForm(false)}
+                className="text-xs text-slate-500 hover:text-slate-700"
+              >
+                Close
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-[11px] font-medium text-slate-600 mb-1">Courier Partner *</label>
+                <input
+                  type="text"
+                  required
+                  value={courierName}
+                  onChange={(e) => setCourierName(e.target.value)}
+                  placeholder="BlueDart / Delhivery / DTDC"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-slate-600 mb-1">AWB / Tracking Number *</label>
+                <input
+                  type="text"
+                  required
+                  value={trackingNumber}
+                  onChange={(e) => setTrackingNumber(e.target.value)}
+                  placeholder="AWB123456789"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-slate-600 mb-1">Tracking URL (Optional)</label>
+                <input
+                  type="url"
+                  value={trackingUrl}
+                  onChange={(e) => setTrackingUrl(e.target.value)}
+                  placeholder="https://..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-slate-600 mb-1">Dispatch Date *</label>
+                <input
+                  type="date"
+                  required
+                  value={dispatchDate}
+                  onChange={(e) => setDispatchDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
+                />
+              </div>
+            </div>
+            <button
+              type="submit"
+              disabled={updatingWorkflow}
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl disabled:opacity-50"
+            >
+              Confirm Dispatch & Notify Customer
+            </button>
+          </form>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Printer Assignment, Payment & Notes */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+            <h2 className="font-display font-bold text-base text-[#0B1D3A]">Print Routing, Payment & Notes</h2>
+
+            <div className="space-y-2">
+              <label className="block text-xs font-medium text-slate-600">Assign Print Facility / In-House Press</label>
+              <div className="flex gap-2">
+                <select
+                  value={selectedPrinter}
+                  onChange={(e) => setSelectedPrinter(e.target.value)}
+                  className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+                >
+                  <option value="admin_inhouse">In-House Print Press (Admin Direct)</option>
+                  {printers.map((p) => (
+                    <option key={p.printerId} value={p.printerId}>{p.businessName} ({p.printerId})</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!userRecord || !selectedPrinter) return;
+                    const nextOrderStatus: OrderStatus = ['Design Pending', 'Design Approved', 'Awaiting Payment', 'Payment Successful', 'Processing'].includes(order.orderStatus)
+                      ? 'Assigned to Printer'
+                      : order.orderStatus;
+                    await updateOrderWorkflow({
+                      orderId: order.orderId,
+                      updates: { printerId: selectedPrinter, orderStatus: nextOrderStatus },
+                      actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+                      auditAction: 'ASSIGN_PRINTER',
+                      auditDetails: `Assigned order ${order.orderNumber} to printer ${selectedPrinter}`,
+                    });
+                    notify('Print destination updated', `Routed to ${selectedPrinter === 'admin_inhouse' ? 'In-House Press' : selectedPrinter}.`, 'success');
+                    load();
+                  }}
+                  className="px-4 py-2 bg-[#1D4ED8] text-white text-xs font-semibold rounded-lg"
+                >
+                  Assign
+                </button>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-slate-600">Change Payment Status</label>
+                <select
+                  value={order.paymentStatus}
+                  onChange={async (e) => {
+                    if (!userRecord) return;
+                    const nextPay = e.target.value as PaymentStatus;
+                    await updateOrderAndPaymentStatus({
+                      order,
+                      paymentStatus: nextPay,
+                      actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+                    });
+                    notify('Payment status updated', nextPay, 'success');
+                    load();
+                  }}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white font-semibold"
+                >
+                  {PAYMENT_STATUS_OPTIONS.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-slate-600">Change Order Status</label>
+                <select
+                  value={order.orderStatus}
+                  onChange={(e) => handleTimelineStatusSelect(e.target.value as OrderStatus)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+                >
+                  {[...ORDER_STATUS_FLOW, 'Cancelled', 'Refunded'].map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 space-y-2">
+              <label className="block text-xs font-medium text-slate-600">Internal Admin Notes</label>
+              <textarea
+                rows={3}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+              />
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!userRecord) return;
+                    await updateOrderWorkflow({
+                      orderId: order.orderId,
+                      updates: { internalNotes: notes },
+                      actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+                      auditAction: 'UPDATE_ORDER_NOTES',
+                      auditDetails: `Updated internal notes on ${order.orderNumber}`,
+                    });
+                    notify('Notes saved', 'Audit log recorded.', 'success');
+                  }}
+                  className="px-4 py-2 bg-[#0B1D3A] text-white text-xs font-semibold rounded-lg"
+                >
+                  Save Notes
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!userRecord) return;
+                    const ok = await confirmAction({
+                      title: 'Cancel & Refund Order',
+                      message: `Mark order ${order.orderNumber} as Refunded and notify customer?`,
+                      destructive: true,
+                      confirmLabel: 'Initiate Refund',
+                    });
+                    if (!ok) return;
+                    await updateOrderWorkflow({
+                      orderId: order.orderId,
+                      updates: { orderStatus: 'Refunded', paymentStatus: 'Refunded' },
+                      actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+                      auditAction: 'REFUND_ORDER',
+                      auditDetails: `Refund initiated for ${order.orderNumber}`,
+                    });
+                    await sendAndLogTransactionalEmail({
+                      uid: order.uid,
+                      to: order.shippingAddress.email,
+                      templateId: 'refund_notification',
+                      variables: { ORDER_NUMBER: order.orderNumber, AMOUNT: String(order.total) },
+                    });
+                    load();
+                  }}
+                  className="px-4 py-2 border border-rose-300 text-rose-700 text-xs font-semibold rounded-lg"
+                >
+                  Cancel / Refund
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* QR Artwork & Print File Readiness */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+            <h2 className="font-display font-bold text-base text-[#0B1D3A]">Verified QR Code & Print Files</h2>
+            {qr?.pngDataUrl ? (
+              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                <img src={qr.pngDataUrl} alt="Order QR" className="w-28 h-28 border border-slate-200 rounded-xl shrink-0" />
+                <div className="space-y-2.5 text-xs min-w-0 flex-1">
+                  <div className="font-mono text-slate-600 break-all">{qr.targetUrl}</div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={generatingPdf}
+                      onClick={() => handleDownloadPdf(false)}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#0B1D3A] text-white rounded-lg font-semibold"
+                    >
+                      <PrinterIcon className="h-3.5 w-3.5" />
+                      <span>300 DPI Print PDF</span>
+                    </button>
+                    <a
+                      href={qr.pngDataUrl}
+                      download={`${order.orderNumber}-qr.png`}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      <span>QR PNG</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl bg-slate-50 border border-dashed border-slate-300 space-y-3">
+                <p className="text-xs text-slate-600">
+                  No production QR artifact is attached to this order yet. Generate it now to enable immediate 300 DPI PDF printing.
+                </p>
+                <button
+                  type="button"
+                  disabled={preparingPrint}
+                  onClick={handlePrepareQrAndPrint}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#1D4ED8] hover:bg-[#1E40AF] text-white rounded-lg text-xs font-semibold disabled:opacity-50"
+                >
+                  <QrCode className="h-3.5 w-3.5" />
+                  <span>{preparingPrint ? 'Generating Print QR...' : 'Generate Print QR & Prepare Files'}</span>
+                </button>
+              </div>
+            )}
+
+            {design && (
+              <div className="pt-4 border-t border-slate-100 space-y-3">
+                <div className="text-xs font-semibold text-[#0B1D3A]">
+                  Card Artwork Proof ({design.dimensions} · {design.cardOrientation})
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-[11px] font-medium text-slate-500 mb-1">Front Side</div>
+                    <CardCanvasPreview
+                      side={design.frontDesign}
+                      orientation={design.cardOrientation}
+                      personalInfo={cardPersonalInfo}
+                      actualQrPng={qr?.pngDataUrl}
+                      showPrintGuides
+                    />
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-medium text-slate-500 mb-1">Back Side</div>
+                    <CardCanvasPreview
+                      side={design.backDesign}
+                      orientation={design.cardOrientation}
+                      personalInfo={cardPersonalInfo}
+                      actualQrPng={qr?.pngDataUrl}
+                      showPrintGuides
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </PortalLayout>
+  );
+};
+
+// 5. Payments, Card Templates, QR Management, Shipping, Reports, Settings, Audit Logs
+export const AdminPaymentsPage: React.FC = () => {
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  useEffect(() => { getAllPayments().then(setPayments); }, []);
+  return (
+    <PortalLayout portal="admin" title="Payment Transactions">
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-x-auto">
+        <table className="w-full text-left text-xs">
+          <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+            <tr>
+              <th className="py-3 px-4">Order ID</th>
+              <th className="py-3 px-4">Gateway</th>
+              <th className="py-3 px-4">Gateway Payment ID</th>
+              <th className="py-3 px-4">Amount</th>
+              <th className="py-3 px-4">Signature Verified</th>
+              <th className="py-3 px-4">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {payments.map((p) => (
+              <tr key={p.paymentId}>
+                <td className="py-3 px-4 font-mono">{p.orderId}</td>
+                <td className="py-3 px-4">{p.gateway}</td>
+                <td className="py-3 px-4 font-mono">{p.gatewayPaymentId || '—'}</td>
+                <td className="py-3 px-4 font-mono tabular-nums font-semibold">₹{p.amount}</td>
+                <td className="py-3 px-4">{p.signatureVerified ? 'Yes (HMAC-SHA256)' : 'No'}</td>
+                <td className="py-3 px-4 font-semibold text-emerald-700">{p.status}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </PortalLayout>
+  );
+};
+
+export const AdminCardTemplatesPage: React.FC = () => {
+  const { userRecord } = useAuth();
+  const { notify, confirmAction } = useToast();
+  const [templates, setTemplates] = useState<CardTemplateRecord[]>(DEFAULT_CARD_TEMPLATES);
+  const [name, setName] = useState('');
+  const [priceInr, setPriceInr] = useState(999);
+  const [cardType, setCardType] = useState('Matte PVC NFC');
+  const [category, setCategory] = useState('Executive');
+  const [description, setDescription] = useState('');
+  const [bgColor, setBgColor] = useState('#0B1D3A');
+  const [draftFrontBgImage, setDraftFrontBgImage] = useState('');
+  const [modalState, setModalState] = useState<{ template: CardTemplateRecord; isNew: boolean } | null>(null);
+
+  const load = () => getCardTemplates(true).then(setTemplates);
+  useEffect(() => { load(); }, []);
+
+  const buildNewTemplateDraft = (): CardTemplateRecord => {
+    const base = DEFAULT_CARD_TEMPLATES[0];
+    return {
+      ...JSON.parse(JSON.stringify(base)),
+      templateId: `tpl-${Date.now()}`,
+      name: name.trim() || 'Untitled Smart Card',
+      priceInr: Math.max(0, Number(priceInr) || 0),
+      cardType: cardType.trim() || 'Matte PVC NFC',
+      category: category.trim() || 'Executive',
+      description: description.trim(),
+      active: true,
+      isDefault: false,
+      supportsVertical: true,
+      frontSpec: {
+        ...JSON.parse(JSON.stringify(base.frontSpec)),
+        backgroundColor: bgColor,
+        gradientTo: '',
+        backgroundImageUrl: draftFrontBgImage || '',
+      },
+    };
+  };
+
+  const resetCreateForm = () => {
+    setName('');
+    setDescription('');
+    setDraftFrontBgImage('');
+  };
+
+  const handleQuickAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userRecord) return;
+    const tpl = buildNewTemplateDraft();
+    await saveCardTemplate(tpl, { uid: userRecord.uid, email: userRecord.email, role: userRecord.role });
+    resetCreateForm();
+    await load();
+    notify('Template added', tpl.name, 'success');
+  };
+
+  const handleSaveFromModal = async (cleaned: CardTemplateRecord) => {
+    if (!userRecord) return;
+    await saveCardTemplate(cleaned, { uid: userRecord.uid, email: userRecord.email, role: userRecord.role });
+    if (modalState?.isNew) {
+      resetCreateForm();
+    }
+    setModalState(null);
+    await load();
+    notify(modalState?.isNew ? 'Template created' : 'Template updated', cleaned.name, 'success');
+  };
+
+  const handleQuickUploadExistingBg = async (tpl: CardTemplateRecord, file: File) => {
+    if (!userRecord) return;
+    try {
+      const compressed = await compressImageFileToDataUrl(file, {
+        maxWidth: 1082,
+        maxHeight: 709,
+        maxChars: 260_000,
+      });
+      const updated: CardTemplateRecord = {
+        ...tpl,
+        frontSpec: { ...tpl.frontSpec, backgroundImageUrl: compressed },
+      };
+      await saveCardTemplate(updated, { uid: userRecord.uid, email: userRecord.email, role: userRecord.role });
+      await load();
+      notify('Background applied', `Updated Front artwork for ${tpl.name}`, 'success');
+    } catch {
+      notify('Upload failed', 'Could not read selected design image.', 'error');
+    }
+  };
+
+  return (
+    <PortalLayout portal="admin" title="Card Templates Management">
+      <div className="space-y-6">
+        <form onSubmit={handleQuickAdd} className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 items-end">
+            <div className="lg:col-span-2">
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Template Name *</label>
+              <input
+                type="text"
+                required
+                minLength={2}
+                maxLength={100}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Executive Emerald"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Price (INR) *</label>
+              <input
+                type="number"
+                required
+                min={0}
+                value={priceInr}
+                onChange={(e) => setPriceInr(Number(e.target.value))}
+                placeholder="999"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Card Finish / Type</label>
+              <input
+                type="text"
+                maxLength={80}
+                value={cardType}
+                onChange={(e) => setCardType(e.target.value)}
+                placeholder="Matte PVC NFC"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Category</label>
+              <input
+                type="text"
+                maxLength={60}
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                placeholder="Executive"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Card Base Color</label>
+              <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)} className="w-full h-9 rounded border border-slate-300 cursor-pointer" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end">
+            <div className="lg:col-span-5">
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Description</label>
+              <input
+                type="text"
+                maxLength={400}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Short description of finish, target audience, and NFC compatibility..."
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+              />
+            </div>
+            <div className="lg:col-span-3 flex flex-wrap items-center gap-2">
+              <label className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer">
+                <Upload className="h-3.5 w-3.5 text-[#1D4ED8]" />
+                <span>{draftFrontBgImage ? 'Change Design Image' : 'Upload Design / BG'}</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = '';
+                    if (!f) return;
+                    const dataUrl = await compressImageFileToDataUrl(f, {
+                      maxWidth: 1082,
+                      maxHeight: 709,
+                      maxChars: 260_000,
+                    });
+                    setDraftFrontBgImage(dataUrl);
+                    notify('Design image attached', 'Open "Customize Layout" to adjust text/QR over your image.', 'info');
+                  }}
+                />
+              </label>
+              {draftFrontBgImage && (
+                <button
+                  type="button"
+                  onClick={() => setDraftFrontBgImage('')}
+                  className="text-xs text-rose-600 hover:underline"
+                >
+                  Clear Image
+                </button>
+              )}
+            </div>
+            <div className="lg:col-span-4 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setModalState({ template: buildNewTemplateDraft(), isNew: true })}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-[#1D4ED8] text-[#1D4ED8] bg-blue-50/70 hover:bg-blue-100 rounded-lg text-xs font-semibold"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>Customize Layout Before Saving</span>
+              </button>
+              <button type="submit" className="px-4 py-2 bg-[#0B1D3A] hover:bg-[#132A52] text-white rounded-lg text-xs font-semibold">
+                Add Card Template
+              </button>
+            </div>
+          </div>
+        </form>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {templates.map((t) => (
+            <div key={t.templateId} className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col justify-between gap-4">
+              <div className="space-y-3">
+                {/* Live Card Miniature Preview */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+                  <CardCanvasPreview
+                    side={t.frontSpec}
+                    orientation="landscape"
+                    personalInfo={{
+                      fullName: 'Aarav Mehta',
+                      jobTitle: 'Managing Director',
+                      companyName: 'TapNex Ventures',
+                    }}
+                  />
+                </div>
+
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <h3 className="font-display font-bold text-sm text-[#0B1D3A] truncate">{t.name}</h3>
+                    <p className="text-xs text-slate-500">
+                      {t.cardType} · {t.category || 'Standard'} ·{' '}
+                      <span className={t.active ? 'text-emerald-700 font-semibold' : 'text-amber-700 font-semibold'}>
+                        {t.active ? 'Active' : 'Inactive'}
+                      </span>
+                    </p>
+                  </div>
+                  <span className="font-mono text-xs font-bold text-[#1D4ED8] shrink-0">₹{t.priceInr}</span>
+                </div>
+                {t.description ? (
+                  <p className="text-xs text-slate-600 line-clamp-2">{t.description}</p>
+                ) : (
+                  <p className="text-[11px] text-slate-400 italic">No description added yet.</p>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between pt-3 border-t border-slate-100 gap-2">
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setModalState({ template: JSON.parse(JSON.stringify(t)) as CardTemplateRecord, isNew: false })}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-[#0B1D3A] hover:text-[#1D4ED8]"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    <span>Edit &amp; Design</span>
+                  </button>
+                  <label className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-[#1D4ED8] cursor-pointer">
+                    <ImageIcon className="h-3.5 w-3.5" />
+                    <span>{t.frontSpec.backgroundImageUrl ? 'Change BG' : 'Add BG'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = '';
+                        if (f) handleQuickUploadExistingBg(t, f);
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!userRecord) return;
+                      await saveCardTemplate({ ...t, active: !t.active }, { uid: userRecord.uid, email: userRecord.email, role: userRecord.role });
+                      load();
+                    }}
+                    className="text-xs font-semibold text-[#1D4ED8] hover:underline"
+                  >
+                    {t.active ? 'Deactivate' : 'Activate'}
+                  </button>
+                </div>
+
+                {userRecord?.role === 'SUPERADMIN' && (
+                  <button
+                    type="button"
+                    title="Delete template"
+                    aria-label={`Delete ${t.name}`}
+                    onClick={async () => {
+                      const ok = await confirmAction({
+                        title: 'Delete Card Template',
+                        message: `Remove "${t.name}" from the card catalog?`,
+                        destructive: true,
+                        confirmLabel: 'Delete Template',
+                      });
+                      if (!ok) return;
+                      await deleteCardTemplate(t.templateId, { uid: userRecord.uid, email: userRecord.email, role: userRecord.role });
+                      await load();
+                      notify('Template deleted', t.name, 'success');
+                    }}
+                    className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Interactive Visual Card Template Studio Modal (New & Existing Templates) */}
+      {modalState && (
+        <TemplateVisualEditorModal
+          initialTemplate={modalState.template}
+          isNew={modalState.isNew}
+          onClose={() => setModalState(null)}
+          onSave={handleSaveFromModal}
+        />
+      )}
+    </PortalLayout>
+  );
+};
+
+export const AdminQrManagementPage: React.FC = () => {
+  const [qrs, setQrs] = useState<QrCodeRecord[]>([]);
+  useEffect(() => { getAllQrCodes().then(setQrs); }, []);
+  return (
+    <PortalLayout portal="admin" title="QR Code Registry">
+      <div className="space-y-4">
+        <div className="flex justify-end">
+          <Link to="/superadmin/qr-generator" className="px-4 py-2 bg-[#0B1D3A] text-white text-xs font-semibold rounded-lg">
+            Open SuperAdmin URL QR Generator
+          </Link>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {qrs.map((q) => (
+            <div key={q.qrCodeId} className="bg-white border border-slate-200 rounded-xl p-4 flex items-center gap-4">
+              {q.pngDataUrl && <img src={q.pngDataUrl} alt={q.qrCodeId} className="w-20 h-20 border border-slate-200 rounded" />}
+              <div className="min-w-0 flex-1 text-xs space-y-1">
+                <div className="font-semibold text-[#0B1D3A]">{q.qrType}</div>
+                <div className="font-mono text-slate-500 truncate">{q.targetUrl}</div>
+                <div className="flex gap-2 pt-1">
+                  {q.pngDataUrl && (
+                    <a href={q.pngDataUrl} download={`${q.qrCodeId}.png`} className="text-[#1D4ED8] font-semibold hover:underline">
+                      PNG
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const blob = new Blob([q.svgContent], { type: 'image/svg+xml' });
+                      downloadBlob(blob, `${q.qrCodeId}.svg`);
+                    }}
+                    className="text-[#1D4ED8] font-semibold hover:underline"
+                  >
+                    SVG
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </PortalLayout>
+  );
+};
+
+export const AdminShippingPage: React.FC = () => {
+  const [records, setRecords] = useState<ShippingRecord[]>([]);
+  useEffect(() => { getAllShippingRecords().then(setRecords); }, []);
+  return (
+    <PortalLayout portal="admin" title="Shipping & Dispatch Tracking">
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-x-auto">
+        <table className="w-full text-left text-xs">
+          <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+            <tr>
+              <th className="py-3 px-4">Order ID</th>
+              <th className="py-3 px-4">Courier</th>
+              <th className="py-3 px-4">Tracking Number</th>
+              <th className="py-3 px-4">Dispatch Date</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {records.map((r) => (
+              <tr key={r.shippingId}>
+                <td className="py-3 px-4 font-mono">{r.orderId}</td>
+                <td className="py-3 px-4 font-semibold">{r.courierName}</td>
+                <td className="py-3 px-4 font-mono">{r.trackingNumber}</td>
+                <td className="py-3 px-4 font-mono">{r.dispatchDate}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </PortalLayout>
+  );
+};
+
+export const AdminReportsPage: React.FC = () => {
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  useEffect(() => { Promise.all([getAllOrders(), getAllUsers()]).then(([o, u]) => { setOrders(o); setUsers(u); }); }, []);
+
+  return (
+    <PortalLayout portal="admin" title="Reports & Analytics Export">
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
+        <h2 className="font-display font-bold text-base text-[#0B1D3A]">Export Platform Reports (CSV / Excel)</h2>
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={() =>
+              exportRowsToExcel(
+                'tapnex-sales-report.xlsx',
+                'Sales',
+                orders.map((o) => ({
+                  orderNumber: o.orderNumber,
+                  customer: o.shippingAddress.fullName,
+                  city: o.shippingAddress.city,
+                  state: o.shippingAddress.state,
+                  subtotal: o.subtotal || 0,
+                  tax: o.tax || 0,
+                  shipping: o.shipping || 0,
+                  total: o.total,
+                  paymentStatus: o.paymentStatus,
+                  orderStatus: o.orderStatus,
+                }))
+              )
+            }
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#0B1D3A] text-white text-xs font-semibold rounded-xl"
+          >
+            <Download className="h-4 w-4" />
+            <span>Export Sales & Revenue (.xlsx)</span>
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              exportRowsToCsv(
+                'tapnex-users-report.csv',
+                users.map((u) => ({ uid: u.uid, email: u.email, role: u.role, status: u.status }))
+              )
+            }
+            className="inline-flex items-center gap-2 px-4 py-2.5 border border-slate-300 text-xs font-semibold rounded-xl"
+          >
+            <Download className="h-4 w-4" />
+            <span>Export Users (.csv)</span>
+          </button>
+        </div>
+      </div>
+    </PortalLayout>
+  );
+};
+
+export const AdminSettingsAndTicketsPage: React.FC = () => {
+  const { userRecord } = useAuth();
+  const { notify } = useToast();
+  const [tickets, setTickets] = useState<SupportTicketRecord[]>([]);
+  const [templates, setTemplates] = useState<EmailTemplateRecord[]>([]);
+  const [selectedTpl, setSelectedTpl] = useState<EmailTemplateRecord | null>(null);
+
+  const load = () => {
+    getSupportTickets().then(setTickets);
+    getEmailTemplates().then((list) => {
+      setTemplates(list);
+      setSelectedTpl(list[0] || null);
+    });
+  };
+  useEffect(() => { load(); }, []);
+
+  return (
+    <PortalLayout portal="admin" title="Support Tickets & Email Templates">
+      <div className="space-y-6">
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+          <h2 className="font-display font-bold text-base text-[#0B1D3A]">Customer Support Tickets</h2>
+          {tickets.length === 0 ? (
+            <p className="text-xs text-slate-500">No support tickets logged.</p>
+          ) : (
+            <div className="space-y-3">
+              {tickets.map((t) => (
+                <div key={t.ticketId} className="p-4 border border-slate-200 rounded-xl space-y-2">
+                  <div className="flex justify-between text-xs text-slate-500">
+                    <span>{t.category} · UID: {t.uid.slice(0, 8)}</span>
+                    <span className="font-semibold text-[#1D4ED8]">{t.status}</span>
+                  </div>
+                  <div className="font-semibold text-sm text-[#0B1D3A]">{t.subject}</div>
+                  <p className="text-xs text-slate-600">{t.message}</p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await updateSupportTicket(t.ticketId, { status: 'Resolved', adminReply: 'Reviewed and resolved by support team.' });
+                        notify('Ticket resolved', t.subject, 'success');
+                        load();
+                      }}
+                      className="px-3 py-1.5 bg-[#0B1D3A] text-white text-xs font-semibold rounded-lg"
+                    >
+                      Mark Resolved
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {selectedTpl && (
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+            <h2 className="font-display font-bold text-base text-[#0B1D3A]">Transactional Email Templates</h2>
+            <select
+              value={selectedTpl.templateId}
+              onChange={(e) => setSelectedTpl(templates.find((t) => t.templateId === e.target.value) || null)}
+              className="px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+            >
+              {templates.map((t) => (
+                <option key={t.templateId} value={t.templateId}>{t.name}</option>
+              ))}
+            </select>
+            <input
+              type="text"
+              value={selectedTpl.subject}
+              onChange={(e) => setSelectedTpl({ ...selectedTpl, subject: e.target.value })}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+            />
+            <textarea
+              rows={6}
+              value={selectedTpl.htmlBody}
+              onChange={(e) => setSelectedTpl({ ...selectedTpl, htmlBody: e.target.value })}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
+            />
+            {userRecord?.role === 'SUPERADMIN' && (
+              <button
+                type="button"
+                onClick={async () => {
+                  await saveEmailTemplate(selectedTpl, { uid: userRecord.uid, email: userRecord.email, role: userRecord.role });
+                  notify('Email template saved', selectedTpl.name, 'success');
+                }}
+                className="px-4 py-2 bg-[#0B1D3A] text-white text-xs font-semibold rounded-lg"
+              >
+                Save Email Template
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </PortalLayout>
+  );
+};
+
+const KNOWN_AUDIT_ACTIONS = [
+  'SAVE_CARD_TEMPLATE',
+  'DELETE_CARD_TEMPLATE',
+  'DELETE_CARD_DESIGN',
+  'DELETE_DIGITAL_PROFILE',
+  'ADMIN_TOGGLE_PROFILE',
+  'UPDATE_USER',
+  'UPDATE_PAYMENT_STATUS',
+  'UPDATE_ORDER_WORKFLOW',
+  'UPDATE_EMAIL_TEMPLATE',
+];
+
+export const AdminAuditLogsPage: React.FC = () => {
+  const { notify } = useToast();
+  const [rawLogs, setRawLogs] = useState<AuditLogRecord[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [hasAppliedFilter, setHasAppliedFilter] = useState(false);
+
+  const [preset, setPreset] = useState<AuditLogPreset>('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [roleFilter, setRoleFilter] = useState('ALL');
+  const [actionFilter, setActionFilter] = useState('ALL');
+  const [keyword, setKeyword] = useState('');
+
+  const availableActions = useMemo(() => {
+    const set = new Set<string>(KNOWN_AUDIT_ACTIONS);
+    if (rawLogs) {
+      for (const l of rawLogs) {
+        if (l.action) set.add(l.action);
+      }
+    }
+    return Array.from(set).sort();
+  }, [rawLogs]);
+
+  const fetchAndShowLogs = async (nextPreset: AuditLogPreset) => {
+    if (!nextPreset && !fromDate && !toDate && roleFilter === 'ALL' && actionFilter === 'ALL' && !keyword.trim()) {
+      notify('Select a filter first', 'Choose All Logs, a date range, role, action, or enter a keyword.', 'info');
+      return;
+    }
+    setLoading(true);
+    try {
+      const loaded = rawLogs ?? (await getAuditLogs(300));
+      setRawLogs(loaded);
+      setHasAppliedFilter(true);
+    } catch (err) {
+      notify('Failed to load audit logs', err instanceof Error ? err.message : 'Unable to query audit logs.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePresetChange = async (value: AuditLogPreset) => {
+    setPreset(value);
+    if (!value) {
+      setHasAppliedFilter(false);
+      return;
+    }
+    if (value !== 'CUSTOM') {
+      await fetchAndShowLogs(value);
+    }
+  };
+
+  const handleApplySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const effectivePreset: AuditLogPreset =
+      fromDate || toDate ? 'CUSTOM' : preset || 'ALL';
+    if (!preset) setPreset(effectivePreset);
+    await fetchAndShowLogs(effectivePreset);
+  };
+
+  const handleReset = () => {
+    setPreset('');
+    setFromDate('');
+    setToDate('');
+    setRoleFilter('ALL');
+    setActionFilter('ALL');
+    setKeyword('');
+    setHasAppliedFilter(false);
+  };
+
+  const filteredLogs = useMemo(() => {
+    if (!hasAppliedFilter || !rawLogs) return [];
+    const effectivePreset: AuditLogPreset =
+      fromDate || toDate ? 'CUSTOM' : preset || 'ALL';
+    return filterAuditLogs(rawLogs, {
+      preset: effectivePreset,
+      fromDate,
+      toDate,
+      role: roleFilter,
+      action: actionFilter,
+      keyword,
+    });
+  }, [hasAppliedFilter, rawLogs, preset, fromDate, toDate, roleFilter, actionFilter, keyword]);
+
+  return (
+    <PortalLayout portal="admin" title="Security & Administrative Audit Logs">
+      <div className="space-y-5">
+        <form onSubmit={handleApplySubmit} className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm font-display font-bold text-[#0B1D3A]">
+              <Filter className="h-4 w-4 text-[#1D4ED8]" />
+              <span>Filter Audit Logs</span>
+            </div>
+            {hasAppliedFilter && (
+              <span className="text-xs font-mono text-slate-500">
+                Showing {filteredLogs.length} matching log{filteredLogs.length === 1 ? '' : 's'}
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Preset / Scope</label>
+              <select
+                value={preset}
+                onChange={(e) => handlePresetChange(e.target.value as AuditLogPreset)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+              >
+                <option value="">-- Select Filter --</option>
+                <option value="ALL">All Audit Logs</option>
+                <option value="LAST_24H">Last 24 Hours</option>
+                <option value="LAST_7D">Last 7 Days</option>
+                <option value="LAST_30D">Last 30 Days</option>
+                <option value="CUSTOM">Custom Date Range (From / To)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">From Date</label>
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(e) => {
+                  setFromDate(e.target.value);
+                  if (e.target.value) setPreset('CUSTOM');
+                }}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">To Date</label>
+              <input
+                type="date"
+                value={toDate}
+                onChange={(e) => {
+                  setToDate(e.target.value);
+                  if (e.target.value) setPreset('CUSTOM');
+                }}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Actor Role</label>
+              <select
+                value={roleFilter}
+                onChange={(e) => setRoleFilter(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+              >
+                <option value="ALL">All Roles</option>
+                <option value="USER">Customer (USER)</option>
+                <option value="PRINTER">Printer (PRINTER)</option>
+                <option value="ADMIN">Admin (ADMIN)</option>
+                <option value="SUPERADMIN">SuperAdmin (SUPERADMIN)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Action Type</label>
+              <select
+                value={actionFilter}
+                onChange={(e) => setActionFilter(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+              >
+                <option value="ALL">All Actions</option>
+                {availableActions.map((act) => (
+                  <option key={act} value={act}>
+                    {act}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Keyword</label>
+              <div className="relative">
+                <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                <input
+                  type="text"
+                  value={keyword}
+                  onChange={(e) => setKeyword(e.target.value)}
+                  placeholder="Email, target, details..."
+                  className="w-full pl-8 pr-2.5 py-2 border border-slate-300 rounded-lg text-xs"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5 pt-1">
+            <button
+              type="submit"
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#0B1D3A] hover:bg-[#132A52] text-white text-xs font-semibold rounded-lg disabled:opacity-50"
+            >
+              <Filter className="h-3.5 w-3.5" />
+              <span>{loading ? 'Loading Logs...' : 'Apply Filter & Show Logs'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleReset}
+              className="inline-flex items-center gap-1.5 px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-semibold rounded-lg"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>Reset / Hide Logs</span>
+            </button>
+            {hasAppliedFilter && (
+              <button
+                type="button"
+                onClick={async () => {
+                  setLoading(true);
+                  try {
+                    const fresh = await getAuditLogs(300);
+                    setRawLogs(fresh);
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                className="text-xs font-semibold text-[#1D4ED8] hover:underline ml-auto"
+              >
+                Refresh Logs
+              </button>
+            )}
+          </div>
+        </form>
+
+        {!hasAppliedFilter ? (
+          <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-10 text-center space-y-2">
+            <Filter className="h-7 w-7 text-slate-400 mx-auto" />
+            <div className="font-display font-bold text-sm text-[#0B1D3A]">
+              Audit logs are hidden until you select a filter
+            </div>
+            <p className="text-xs text-slate-500 max-w-md mx-auto">
+              Select a preset such as <strong>All Audit Logs</strong> or <strong>Last 24 Hours</strong>, enter a <strong>From / To</strong> date range, or search by <strong>Keyword</strong> and click <strong>Apply Filter &amp; Show Logs</strong>.
+            </p>
+          </div>
+        ) : (
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                <tr>
+                  <th className="py-3 px-4">Timestamp</th>
+                  <th className="py-3 px-4">Action</th>
+                  <th className="py-3 px-4">Actor</th>
+                  <th className="py-3 px-4">Target</th>
+                  <th className="py-3 px-4">Details</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loading ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-slate-400">
+                      Loading audit logs...
+                    </td>
+                  </tr>
+                ) : filteredLogs.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-slate-400">
+                      No audit log entries matched your selected filters.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredLogs.map((l) => (
+                    <tr key={l.logId}>
+                      <td className="py-3 px-4 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                        {formatTimestampDate(l.createdAt)}
+                      </td>
+                      <td className="py-3 px-4 font-mono font-semibold text-[#0B1D3A] whitespace-nowrap">{l.action}</td>
+                      <td className="py-3 px-4 whitespace-nowrap">{l.actorEmail || l.actorUid} ({l.actorRole})</td>
+                      <td className="py-3 px-4 font-mono whitespace-nowrap">{l.targetCollection}/{l.targetId}</td>
+                      <td className="py-3 px-4 text-slate-600">{l.details || '—'}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </PortalLayout>
+  );
+};
+
+// 6. Admin / SuperAdmin Digital Profiles Management (Enable/Disable + Delete)
+export const AdminProfilesPage: React.FC = () => {
+  const { userRecord, appSettings } = useAuth();
+  const { notify, confirmAction } = useToast();
+  const [profiles, setProfiles] = useState<ProfileRecord[]>([]);
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [search, setSearch] = useState('');
+  const [stateFilter, setStateFilter] = useState<'ALL' | 'ACTIVE' | 'DISABLED'>('ALL');
+  const [loading, setLoading] = useState(true);
+
+  const load = () => {
+    setLoading(true);
+    Promise.all([getAllProfiles(), getAllUsers(), getAllOrders()])
+      .then(([profs, usrs, ords]) => {
+        setProfiles(profs);
+        setUsers(usrs);
+        setOrders(ords);
+      })
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const userMap = useMemo(() => {
+    const map = new Map<string, UserRecord>();
+    for (const u of users) map.set(u.uid, u);
+    return map;
+  }, [users]);
+
+  const filtered = profiles.filter((p) => {
+    const owner = userMap.get(p.uid);
+    const q = search.toLowerCase();
+    const matchText =
+      !q ||
+      p.slug.toLowerCase().includes(q) ||
+      (p.profileLabel || '').toLowerCase().includes(q) ||
+      (p.personalInformation.fullName || '').toLowerCase().includes(q) ||
+      (owner?.email || '').toLowerCase().includes(q);
+    const matchState =
+      stateFilter === 'ALL' ||
+      (stateFilter === 'ACTIVE' && p.isPublic) ||
+      (stateFilter === 'DISABLED' && !p.isPublic);
+    return matchText && matchState;
+  });
+
+  return (
+    <PortalLayout portal="admin" title="Digital Profiles Control">
+      <div className="space-y-5">
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-wrap gap-3 items-center justify-between">
+          <div className="flex flex-wrap gap-2.5 flex-1">
+            <div className="relative flex-1 min-w-[220px]">
+              <Search className="h-4 w-4 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by slug, name, or owner email..."
+                className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-xs"
+              />
+            </div>
+            <select
+              value={stateFilter}
+              onChange={(e) => setStateFilter(e.target.value as 'ALL' | 'ACTIVE' | 'DISABLED')}
+              className="px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+            >
+              <option value="ALL">All Statuses</option>
+              <option value="ACTIVE">Enabled / Public</option>
+              <option value="DISABLED">Disabled</option>
+            </select>
+          </div>
+          <div className="text-xs font-mono text-slate-500">
+            Showing {filtered.length} of {profiles.length} profiles
+          </div>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+              <tr>
+                <th className="py-3 px-4">Profile / Owner</th>
+                <th className="py-3 px-4">Public Slug</th>
+                <th className="py-3 px-4">Payment</th>
+                <th className="py-3 px-4">Status</th>
+                <th className="py-3 px-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {loading ? (
+                <tr>
+                  <td colSpan={5} className="py-8 text-center text-slate-400">Loading digital profiles...</td>
+                </tr>
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="py-8 text-center text-slate-400">No digital profiles matched.</td>
+                </tr>
+              ) : (
+                filtered.map((p) => {
+                  const owner = userMap.get(p.uid);
+                  const paid = orders.some(
+                    (o) => o.profileId === p.profileId && (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed')
+                  );
+                  return (
+                    <tr key={p.profileId}>
+                      <td className="py-3 px-4">
+                        <div className="font-semibold text-[#0B1D3A]">
+                          {p.personalInformation.fullName || p.profileLabel || p.slug}
+                        </div>
+                        <div className="text-slate-500">{owner?.email || p.uid}</div>
+                      </td>
+                      <td className="py-3 px-4 font-mono">
+                        <a
+                          href={`/p/${p.slug}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[#1D4ED8] hover:underline"
+                        >
+                          <span>/p/{p.slug}</span>
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`font-semibold ${paid ? 'text-emerald-700' : 'text-amber-700'}`}>
+                          {paid ? 'Confirmed' : 'Unpaid'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`font-semibold ${p.isPublic ? 'text-emerald-700' : 'text-rose-700'}`}>
+                          {p.isPublic ? 'Enabled' : 'Disabled'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right space-x-2 whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!userRecord) return;
+                            await adminToggleProfileStatus({
+                              profile: p,
+                              isPublic: !p.isPublic,
+                              actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+                              inactiveMessage: appSettings.inactiveProfileMessage,
+                            });
+                            notify(p.isPublic ? 'Profile disabled' : 'Profile enabled', `/p/${p.slug}`, 'success');
+                            load();
+                          }}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold hover:bg-slate-50"
+                        >
+                          <Power className="h-3.5 w-3.5" />
+                          <span>{p.isPublic ? 'Disable' : 'Enable'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!userRecord) return;
+                            const ok = await confirmAction({
+                              title: 'Delete Digital Profile',
+                              message: `Permanently delete profile /p/${p.slug} belonging to ${owner?.email || p.uid}?`,
+                              destructive: true,
+                              confirmLabel: 'Delete Profile',
+                            });
+                            if (!ok) return;
+                            await deleteDigitalProfile({
+                              profile: p,
+                              actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+                            });
+                            notify('Digital profile deleted', `/p/${p.slug}`, 'success');
+                            load();
+                          }}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 border border-rose-200 text-rose-600 rounded-lg text-xs font-semibold hover:bg-rose-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          <span>Delete</span>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </PortalLayout>
+  );
+};
+
+// 7. Admin / SuperAdmin Approved Designs Directory + Direct-to-Print Dispatch
+export const AdminApprovedDesignsPage: React.FC = () => {
+  const { userRecord, appSettings } = useAuth();
+  const { notify, confirmAction } = useToast();
+  const [designs, setDesigns] = useState<CardDesignRecord[]>([]);
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [profiles, setProfiles] = useState<ProfileRecord[]>([]);
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [printers, setPrinters] = useState<PrinterRecord[]>([]);
+  const [templates, setTemplates] = useState<CardTemplateRecord[]>(DEFAULT_CARD_TEMPLATES);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  // Direct Send-to-Print Modal State
+  const [printTarget, setPrintTarget] = useState<{
+    design: CardDesignRecord;
+    owner: UserRecord | null;
+    prof: ProfileRecord | null;
+    linkedOrder: OrderRecord | null;
+  } | null>(null);
+  const [printPrinterId, setPrintPrinterId] = useState('admin_inhouse');
+  const [printInitialStatus, setPrintInitialStatus] = useState<OrderStatus>('Assigned to Printer');
+  const [printQuantity, setPrintQuantity] = useState(1);
+  const [printCardType, setPrintCardType] = useState('Matte PVC NFC');
+  const [printUnitPrice, setPrintUnitPrice] = useState(999);
+  const [printMarkPaid, setPrintMarkPaid] = useState(false);
+  const [printNotes, setPrintNotes] = useState('');
+  const [printShipping, setPrintShipping] = useState<ShippingAddress>({
+    fullName: '',
+    mobile: '',
+    email: '',
+    addressLine1: '',
+    addressLine2: '',
+    city: '',
+    state: 'Maharashtra',
+    pinCode: '',
+    country: 'India',
+  });
+  const [submittingPrint, setSubmittingPrint] = useState(false);
+  const [printResult, setPrintResult] = useState<{
+    orderId: string;
+    orderNumber: string;
+    qrRecord: QrCodeRecord;
+    design: CardDesignRecord;
+    info: Partial<PersonalInformation>;
+  } | null>(null);
+
+  const load = () => {
+    setLoading(true);
+    Promise.all([
+      getAllCardDesigns(),
+      getAllUsers(),
+      getAllProfiles(),
+      getAllOrders(),
+      getAllPrinters(),
+      getCardTemplates(true),
+    ])
+      .then(([des, usrs, profs, ords, prts, tpls]) => {
+        setDesigns(des.filter((d) => d.approved));
+        setUsers(usrs);
+        setProfiles(profs);
+        setOrders(ords);
+        setPrinters(prts);
+        if (tpls.length > 0) setTemplates(tpls);
+      })
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const userMap = useMemo(() => {
+    const m = new Map<string, UserRecord>();
+    for (const u of users) m.set(u.uid, u);
+    return m;
+  }, [users]);
+
+  const profileMap = useMemo(() => {
+    const m = new Map<string, ProfileRecord>();
+    for (const p of profiles) m.set(p.profileId, p);
+    return m;
+  }, [profiles]);
+
+  const filtered = designs.filter((d) => {
+    const owner = userMap.get(d.uid);
+    const prof = profileMap.get(d.profileId);
+    const q = search.toLowerCase();
+    return (
+      !q ||
+      (owner?.displayName || '').toLowerCase().includes(q) ||
+      (owner?.email || '').toLowerCase().includes(q) ||
+      (prof?.slug || '').toLowerCase().includes(q) ||
+      (prof?.personalInformation.fullName || '').toLowerCase().includes(q)
+    );
+  });
+
+  const openSendToPrintModal = (
+    design: CardDesignRecord,
+    owner: UserRecord | null,
+    prof: ProfileRecord | null,
+    linkedOrder: OrderRecord | null
+  ) => {
+    const tpl = templates.find((t) => t.templateId === design.templateId) || templates[0];
+    const info = prof?.personalInformation;
+    const isPaid =
+      linkedOrder?.paymentStatus === 'Verified' || linkedOrder?.paymentStatus === 'Completed';
+
+    setPrintResult(null);
+    setPrintPrinterId(linkedOrder?.printerId || 'admin_inhouse');
+    setPrintInitialStatus(
+      linkedOrder && ORDER_STATUS_FLOW.indexOf(linkedOrder.orderStatus) >= ORDER_STATUS_FLOW.indexOf('Assigned to Printer')
+        ? linkedOrder.orderStatus
+        : 'Assigned to Printer'
+    );
+    setPrintQuantity(linkedOrder?.quantity || 1);
+    setPrintCardType(linkedOrder?.cardType || tpl?.cardType || 'Matte PVC NFC');
+    setPrintUnitPrice(tpl?.priceInr ?? appSettings.baseCardPriceInr ?? 999);
+    setPrintMarkPaid(Boolean(isPaid));
+    setPrintNotes(linkedOrder?.internalNotes || 'Dispatched directly from Approved Card Designs');
+    setPrintShipping({
+      fullName: linkedOrder?.shippingAddress.fullName || info?.fullName || owner?.displayName || 'Customer',
+      mobile: linkedOrder?.shippingAddress.mobile || info?.mobile || owner?.phone || '9999999999',
+      email: linkedOrder?.shippingAddress.email || info?.email || owner?.email || 'support@tapnex.in',
+      addressLine1: linkedOrder?.shippingAddress.addressLine1 || info?.businessAddress || info?.personalAddress || 'In-house Print Pickup',
+      addressLine2: linkedOrder?.shippingAddress.addressLine2 || '',
+      city: linkedOrder?.shippingAddress.city || info?.city || 'Pune',
+      state: linkedOrder?.shippingAddress.state || info?.state || 'Maharashtra',
+      pinCode: linkedOrder?.shippingAddress.pinCode || info?.pinCode || '411001',
+      country: linkedOrder?.shippingAddress.country || info?.country || 'India',
+    });
+    setPrintTarget({ design, owner, prof, linkedOrder });
+  };
+
+  const handleConfirmSendToPrint = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!printTarget || !userRecord) return;
+    setSubmittingPrint(true);
+    try {
+      const subtotal = Math.max(0, printUnitPrice) * Math.max(1, printQuantity);
+      const tax = printTarget.linkedOrder?.tax ?? Math.round((subtotal * (appSettings.taxRatePercent || 18)) / 100);
+      const shippingFee = printTarget.linkedOrder?.shipping ?? (appSettings.shippingFeeInr || 0);
+      const total = printTarget.linkedOrder?.total ?? subtotal + tax + shippingFee;
+
+      const res = await sendApprovedDesignToPrint({
+        design: printTarget.design,
+        existingOrder: printTarget.linkedOrder,
+        profile: printTarget.prof,
+        owner: printTarget.owner,
+        actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+        quantity: printQuantity,
+        cardType: printCardType,
+        subtotal,
+        tax,
+        shippingFee,
+        total,
+        printerId: printPrinterId || 'admin_inhouse',
+        initialOrderStatus: printInitialStatus,
+        markPaymentCompleted: printMarkPaid,
+        shippingAddress: printShipping,
+        notes: printNotes,
+      });
+
+      if (printPrinterId && printPrinterId !== 'admin_inhouse') {
+        const printerObj = printers.find((p) => p.printerId === printPrinterId);
+        if (printerObj?.email) {
+          await sendAndLogTransactionalEmail({
+            uid: printTarget.design.uid,
+            to: printerObj.email,
+            templateId: 'printer_assigned',
+            variables: { ORDER_NUMBER: res.orderNumber },
+          });
+        }
+      }
+
+      setPrintResult({
+        ...res,
+        design: printTarget.design,
+        info: printTarget.prof?.personalInformation || {
+          fullName: printShipping.fullName,
+          mobile: printShipping.mobile,
+          email: printShipping.email,
+        },
+      });
+      notify(
+        'Card sent to print!',
+        `Order ${res.orderNumber} queued (${printInitialStatus}) with verified QR & 300 DPI PDF ready.`,
+        'success'
+      );
+      load();
+    } catch (err) {
+      notify('Print routing failed', err instanceof Error ? err.message : 'Unable to send card to print.', 'error');
+    } finally {
+      setSubmittingPrint(false);
+    }
+  };
+
+  const handleQuickDownloadExistingOrderPdf = async (
+    d: CardDesignRecord,
+    ord: OrderRecord,
+    prof: ProfileRecord | undefined
+  ) => {
+    if (!userRecord) return;
+    try {
+      const qrDoc = await ensureOrderQrArtifact({
+        order: ord,
+        profileSlug: prof?.slug || ord.profileSlug,
+        actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+      });
+      if (!qrDoc.pngDataUrl) return;
+      const pdf = await generatePrintReadyPdfBlob({
+        design: d,
+        info: prof?.personalInformation || {
+          fullName: ord.shippingAddress.fullName,
+          mobile: ord.shippingAddress.mobile,
+          email: ord.shippingAddress.email,
+        },
+        qrPngDataUrl: qrDoc.pngDataUrl,
+      });
+      downloadBlob(pdf.blob, `${ord.orderNumber}-300dpi-print.pdf`);
+      notify('300 DPI Print PDF generated', `${ord.orderNumber}`, 'success');
+    } catch (err) {
+      notify('PDF generation failed', err instanceof Error ? err.message : 'Unable to build PDF.', 'error');
+    }
+  };
+
+  const handleDeleteDesign = async (d: CardDesignRecord, ownerLabel: string) => {
+    if (!userRecord) return;
+    const ok = await confirmAction({
+      title: 'Delete Approved Design',
+      message: `Permanently delete this approved card design for ${ownerLabel}? This cannot be undone.`,
+      destructive: true,
+      confirmLabel: 'Delete Design',
+    });
+    if (!ok) return;
+    try {
+      await deleteCardDesign(
+        d.designId,
+        { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+        `Deleted approved design ${d.designId} (${ownerLabel})`
+      );
+      setDesigns((prev) => prev.filter((item) => item.designId !== d.designId));
+      notify('Design deleted', `Removed approved design for ${ownerLabel}.`, 'success');
+    } catch (err) {
+      notify('Delete failed', err instanceof Error ? err.message : 'Unable to delete design.', 'error');
+    }
+  };
+
+  return (
+    <PortalLayout portal="admin" title="Approved Designs & Direct Print">
+      <div className="space-y-5">
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="relative flex-1 min-w-[220px]">
+            <Search className="h-4 w-4 text-slate-400 absolute left-3 top-2.5" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search user name, email, or profile slug..."
+              className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-xs"
+            />
+          </div>
+          <div className="text-xs font-mono text-slate-500">
+            {filtered.length} approved card designs
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {[1, 2].map((i) => (
+              <div key={i} className="h-72 bg-slate-200 rounded-2xl animate-pulse" />
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center text-sm text-slate-500">
+            No customer-approved card designs found yet.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            {filtered.map((d) => {
+              const owner = userMap.get(d.uid) || null;
+              const prof = profileMap.get(d.profileId);
+              const ownerLabel =
+                owner?.displayName || prof?.personalInformation.fullName || owner?.email || d.uid;
+              const linkedOrder =
+                orders.find((o) => o.orderId === d.orderId || o.designId === d.designId) || null;
+              const isPaid =
+                linkedOrder?.paymentStatus === 'Verified' || linkedOrder?.paymentStatus === 'Completed';
+
+              return (
+                <div key={d.designId} className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-3">
+                    <div>
+                      <div className="font-display font-bold text-base text-[#0B1D3A]">
+                        {ownerLabel}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {owner?.email || d.uid} · {d.dimensions} ({d.cardOrientation})
+                      </div>
+                      {linkedOrder && (
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-mono text-slate-600">
+                          <span className="font-semibold text-[#0B1D3A]">{linkedOrder.orderNumber}</span>
+                          <span>·</span>
+                          <span className="text-[#1D4ED8] font-semibold">{linkedOrder.orderStatus}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`px-2.5 py-1 rounded-md text-xs font-semibold ${
+                          isPaid
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-amber-50 text-amber-800 border border-amber-200'
+                        }`}
+                      >
+                        {linkedOrder ? `Payment: ${linkedOrder.paymentStatus}` : 'Unpaid (Design Saved)'}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => openSendToPrintModal(d, owner, prof || null, linkedOrder)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#1D4ED8] hover:bg-[#1E40AF] text-white rounded-lg text-xs font-semibold transition-colors"
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                        <span>{linkedOrder ? 'Print / Reassign' : 'Send to Print'}</span>
+                      </button>
+
+                      {linkedOrder && (
+                        <>
+                          <Link
+                            to={`/admin/orders/${linkedOrder.orderId}`}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold"
+                          >
+                            <span>Fulfil / Timeline</span>
+                            <ArrowRight className="h-3 w-3" />
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickDownloadExistingOrderPdf(d, linkedOrder, prof)}
+                            title="Download 300 DPI Print PDF"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg text-xs font-semibold"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            <span>300 DPI PDF</span>
+                          </button>
+                        </>
+                      )}
+
+                      {prof && (
+                        <a
+                          href={`/p/${prof.slug}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#0B1D3A] text-white rounded-lg text-xs font-semibold hover:bg-[#132A52]"
+                        >
+                          <span>/p/{prof.slug}</span>
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteDesign(d, ownerLabel)}
+                        title="Delete approved design"
+                        aria-label={`Delete design for ${ownerLabel}`}
+                        className="inline-flex items-center justify-center p-2 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 transition-colors"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <div className="text-[11px] font-medium text-slate-500 mb-1.5">Front Side</div>
+                      <CardCanvasPreview
+                        side={d.frontDesign}
+                        orientation={d.cardOrientation}
+                        personalInfo={prof?.personalInformation || {}}
+                      />
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-medium text-slate-500 mb-1.5">Back Side</div>
+                      <CardCanvasPreview
+                        side={d.backDesign}
+                        orientation={d.cardOrientation}
+                        personalInfo={prof?.personalInformation || {}}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Direct Send-to-Print & Fulfilment Modal */}
+      {printTarget && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden my-auto">
+            <div className="px-6 py-4 bg-[#0B1D3A] text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <PrinterIcon className="h-5 w-5 text-cyan-300" />
+                <div>
+                  <div className="font-display font-bold text-base">
+                    {printResult ? `Print Job Created: ${printResult.orderNumber}` : 'Send Approved Card Directly to Print'}
+                  </div>
+                  <div className="text-[11px] text-slate-300">
+                    {printTarget.owner?.displayName || printTarget.prof?.personalInformation.fullName || printTarget.design.uid}
+                    {printTarget.prof?.slug ? ` · /p/${printTarget.prof.slug}` : ''}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setPrintTarget(null);
+                  setPrintResult(null);
+                }}
+                className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {printResult ? (
+              <div className="p-6 space-y-5">
+                <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-3">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+                  <div className="text-xs text-emerald-950 space-y-1">
+                    <div className="font-bold text-sm">
+                      Order {printResult.orderNumber} is Ready for Production
+                    </div>
+                    <p>
+                      High-resolution verified QR code has been attached and your 300 DPI print-ready PDF is available immediately.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-4 p-4 rounded-xl border border-slate-200 bg-slate-50">
+                  {printResult.qrRecord.pngDataUrl && (
+                    <img
+                      src={printResult.qrRecord.pngDataUrl}
+                      alt="Order QR"
+                      className="w-20 h-20 border border-slate-200 rounded-lg bg-white"
+                    />
+                  )}
+                  <div className="space-y-1 text-xs min-w-0 flex-1">
+                    <div className="font-semibold text-[#0B1D3A]">Verified NFC / QR Target</div>
+                    <div className="font-mono text-slate-600 break-all">{printResult.qrRecord.targetUrl}</div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!printResult.qrRecord.pngDataUrl) return;
+                      const pdf = await generatePrintReadyPdfBlob({
+                        design: printResult.design,
+                        info: printResult.info,
+                        qrPngDataUrl: printResult.qrRecord.pngDataUrl,
+                      });
+                      downloadBlob(pdf.blob, `${printResult.orderNumber}-300dpi-print.pdf`);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-[#0B1D3A] hover:bg-[#132A52] text-white text-xs font-semibold rounded-xl"
+                  >
+                    <Download className="h-4 w-4" />
+                    <span>Download 300 DPI Print PDF</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!printResult.qrRecord.pngDataUrl) return;
+                      const pdf = await generatePrintReadyPdfBlob({
+                        design: printResult.design,
+                        info: printResult.info,
+                        qrPngDataUrl: printResult.qrRecord.pngDataUrl,
+                        includeProofGuides: true,
+                      });
+                      downloadBlob(pdf.blob, `${printResult.orderNumber}-proof.pdf`);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-semibold rounded-xl"
+                  >
+                    <FileText className="h-4 w-4" />
+                    <span>Download Proof w/ Guides</span>
+                  </button>
+                  <Link
+                    to={`/admin/orders/${printResult.orderId}`}
+                    onClick={() => {
+                      setPrintTarget(null);
+                      setPrintResult(null);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-[#1D4ED8] hover:bg-[#1E40AF] text-white text-xs font-semibold rounded-xl"
+                  >
+                    <span>Open Fulfilment Timeline</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </Link>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleConfirmSendToPrint} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Print Facility / Route *
+                    </label>
+                    <select
+                      value={printPrinterId}
+                      onChange={(e) => setPrintPrinterId(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+                    >
+                      <option value="admin_inhouse">In-House Print Press (Admin Direct)</option>
+                      {printers.map((p) => (
+                        <option key={p.printerId} value={p.printerId}>
+                          {p.businessName} ({p.printerId})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Initial Fulfilment Stage *
+                    </label>
+                    <select
+                      value={printInitialStatus}
+                      onChange={(e) => setPrintInitialStatus(e.target.value as OrderStatus)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+                    >
+                      <option value="Assigned to Printer">Assigned to Printer</option>
+                      <option value="Printing in Progress">Printing in Progress</option>
+                      <option value="Processing">Processing</option>
+                      <option value="Quality Check">Quality Check</option>
+                      <option value="Ready for Dispatch">Ready for Dispatch</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">Card Finish / Type</label>
+                    <input
+                      type="text"
+                      required
+                      value={printCardType}
+                      onChange={(e) => setPrintCardType(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">Quantity *</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={500}
+                        required
+                        value={printQuantity}
+                        onChange={(e) => setPrintQuantity(Math.max(1, Number(e.target.value) || 1))}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">Unit Price (INR)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        required
+                        value={printUnitPrice}
+                        onChange={(e) => setPrintUnitPrice(Math.max(0, Number(e.target.value) || 0))}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <label className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-200 bg-slate-50 cursor-pointer text-xs">
+                  <input
+                    type="checkbox"
+                    checked={printMarkPaid}
+                    onChange={(e) => setPrintMarkPaid(e.target.checked)}
+                    className="mt-0.5 rounded border-slate-300 text-[#1D4ED8]"
+                  />
+                  <span>
+                    <strong className="text-[#0B1D3A] block">Mark Payment as Verified / Completed</strong>
+                    <span className="text-slate-500">
+                      Records verified payment and automatically unlocks the customer&apos;s watermark-free public profile. Leave unchecked for complimentary/sample press runs or offline billing.
+                    </span>
+                  </span>
+                </label>
+
+                <div className="pt-2 border-t border-slate-100 space-y-2.5">
+                  <div className="text-xs font-semibold text-[#0B1D3A]">Recipient & Delivery Details</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <input
+                      type="text"
+                      required
+                      value={printShipping.fullName}
+                      onChange={(e) => setPrintShipping({ ...printShipping, fullName: e.target.value })}
+                      placeholder="Recipient Name *"
+                      className="px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                    />
+                    <input
+                      type="tel"
+                      required
+                      value={printShipping.mobile}
+                      onChange={(e) => setPrintShipping({ ...printShipping, mobile: e.target.value })}
+                      placeholder="Mobile *"
+                      className="px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
+                    />
+                    <input
+                      type="email"
+                      required
+                      value={printShipping.email}
+                      onChange={(e) => setPrintShipping({ ...printShipping, email: e.target.value })}
+                      placeholder="Email *"
+                      className="px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                    />
+                    <input
+                      type="text"
+                      required
+                      value={printShipping.addressLine1}
+                      onChange={(e) => setPrintShipping({ ...printShipping, addressLine1: e.target.value })}
+                      placeholder="Delivery Address *"
+                      className="sm:col-span-2 px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                    />
+                    <input
+                      type="text"
+                      required
+                      value={printShipping.city}
+                      onChange={(e) => setPrintShipping({ ...printShipping, city: e.target.value })}
+                      placeholder="City *"
+                      className="px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                    />
+                    <select
+                      value={printShipping.state}
+                      onChange={(e) => setPrintShipping({ ...printShipping, state: e.target.value })}
+                      className="px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+                    >
+                      {INDIAN_STATES.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      required
+                      value={printShipping.pinCode}
+                      onChange={(e) => setPrintShipping({ ...printShipping, pinCode: e.target.value })}
+                      placeholder="PIN Code *"
+                      className="px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
+                    />
+                    <input
+                      type="text"
+                      value={printNotes}
+                      onChange={(e) => setPrintNotes(e.target.value)}
+                      placeholder="Internal Print Notes"
+                      className="px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setPrintTarget(null)}
+                    className="px-4 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingPrint}
+                    className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-[#0B1D3A] hover:bg-[#132A52] text-white rounded-xl text-xs font-semibold disabled:opacity-50"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                    <span>{submittingPrint ? 'Generating Print QR & Order...' : 'Confirm & Send to Print'}</span>
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+    </PortalLayout>
+  );
+};
