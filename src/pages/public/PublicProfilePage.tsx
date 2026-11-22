@@ -15,12 +15,14 @@ import {
   Lock,
 } from 'lucide-react';
 import {
+  getAllOrders,
   getPublicProfileBySlug,
   getAppSettings,
   getCustomerOrders,
   isOrderPaymentConfirmed,
   maskEmail,
   maskPhone,
+  reconcileDeliveredOrdersToProfiles,
 } from '../../lib/firestoreService';
 import { downloadVCard } from '../../lib/vcard';
 import { sanitizeRichBioHtml } from '../../lib/richText';
@@ -74,14 +76,36 @@ export const PublicProfilePage: React.FC = () => {
   useEffect(() => {
     let active = true;
     async function verifyOwnerPayment() {
-      if (!profile || profile.paymentConfirmed || !userRecord || userRecord.uid !== profile.uid) {
+      if (!profile || !userRecord) {
+        if (active) setOwnerPaidConfirmed(false);
+        return;
+      }
+      const isOwner = userRecord.uid === profile.uid;
+      const isAdminRole = userRecord.role === 'ADMIN' || userRecord.role === 'SUPERADMIN';
+      if (!isOwner && !isAdminRole) {
+        if (active) setOwnerPaidConfirmed(false);
+        return;
+      }
+      if (profile.paymentConfirmed && profile.isPublic) {
         if (active) setOwnerPaidConfirmed(false);
         return;
       }
       try {
-        const orders = await getCustomerOrders(userRecord.uid);
+        const orders = isOwner
+          ? await getCustomerOrders(userRecord.uid)
+          : await getAllOrders();
         if (!active) return;
-        setOwnerPaidConfirmed(isOrderPaymentConfirmed(orders, profile.profileId, profile.slug));
+        const confirmed = isOrderPaymentConfirmed(orders, profile.profileId, profile.slug);
+        if (isOwner) setOwnerPaidConfirmed(confirmed);
+        if (confirmed && !profile.adminDisabled) {
+          const matching = orders.filter(
+            (o) => o.profileId === profile.profileId || o.profileSlug === profile.slug
+          );
+          const changed = await reconcileDeliveredOrdersToProfiles(matching, userRecord.role).catch(() => false);
+          if (changed && active) {
+            setProfile((prev) => (prev ? { ...prev, paymentConfirmed: true, isPublic: true } : prev));
+          }
+        }
       } catch {
         // ignore if unable to read orders
       }
@@ -188,7 +212,7 @@ export const PublicProfilePage: React.FC = () => {
   const addressParts = [info.businessAddress, info.city, info.state, info.pinCode, info.country].filter(Boolean);
 
   return (
-    <ScreenProtectionShield active watermarkLabel={`TAPNEX PROTECTED · /p/${profile.slug}`}>
+    <ScreenProtectionShield active={!isPaidLive} watermarkLabel={`TAPNEX PROTECTED · /p/${profile.slug}`}>
     <div className="min-h-screen bg-slate-100 py-6 sm:py-12 px-4">
       <div
         className={`relative max-w-lg mx-auto bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm ${

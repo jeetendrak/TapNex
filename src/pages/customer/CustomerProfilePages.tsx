@@ -41,6 +41,7 @@ import {
   markProfilePaymentCompleted,
   maskEmail,
   maskPhone,
+  reconcileDeliveredOrdersToProfiles,
   sanitizeSlug,
   saveProfileAndSyncPublic,
 } from '../../lib/firestoreService';
@@ -119,7 +120,7 @@ const WatermarkedProfileModal: React.FC<{
     >
       <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto bg-white rounded-3xl border border-slate-200 shadow-2xl">
         <ScreenProtectionShield
-          active
+          active={!isPaid}
           watermarkLabel={
             isPaid ? `TAPNEX PROTECTED · /p/${profile.slug}` : 'TAPNEX PREVIEW · PAYMENT PENDING'
           }
@@ -563,8 +564,13 @@ export const CustomerOverviewPage: React.FC = () => {
     Promise.all([getCustomerOrders(userRecord.uid), getUserDesigns(userRecord.uid)]).then(([o, d]) => {
       setOrders(o);
       setDesigns(d);
+      if (profiles.length > 0) {
+        reconcileDeliveredOrdersToProfiles(o, userRecord.role, profiles).then((changed) => {
+          if (changed) reload();
+        });
+      }
     });
-  }, [userRecord]);
+  }, [userRecord, profiles.length]);
 
   const completion = calculateProfileCompletion(activeProfile);
   const latestOrder = orders[0];
@@ -1133,8 +1139,15 @@ export const CustomerProfilePage: React.FC = () => {
 
   useEffect(() => {
     if (!userRecord) return;
-    getCustomerOrders(userRecord.uid).then(setOrders);
-  }, [userRecord]);
+    getCustomerOrders(userRecord.uid).then((o) => {
+      setOrders(o);
+      if (profiles.length > 0) {
+        reconcileDeliveredOrdersToProfiles(o, userRecord.role, profiles).then((changed) => {
+          if (changed) reload();
+        });
+      }
+    });
+  }, [userRecord, profiles.length]);
 
   useEffect(() => {
     if (activeProfile) {
@@ -2344,8 +2357,15 @@ export const CustomerVisibilityPage: React.FC = () => {
 
   useEffect(() => {
     if (!userRecord) return;
-    getCustomerOrders(userRecord.uid).then(setOrders);
-  }, [userRecord]);
+    getCustomerOrders(userRecord.uid).then((o) => {
+      setOrders(o);
+      if (profiles.length > 0) {
+        reconcileDeliveredOrdersToProfiles(o, userRecord.role, profiles).then((changed) => {
+          if (changed) reload();
+        });
+      }
+    });
+  }, [userRecord, profiles.length]);
 
   if (loading) {
     return (

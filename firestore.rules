@@ -386,15 +386,35 @@ service cloud.firestore {
     match /publicProfiles/{slug} {
       allow get: if isValidId(slug);
       allow list: if isAdmin();
-      allow create, update: if isValidId(slug) && isValidPublicProfile(incoming()) &&
+      allow create: if isValidId(slug) && isValidPublicProfile(incoming()) &&
         incoming().updatedAt == request.time && (
           isAdmin() ||
           (isActiveUser() && incoming().uid == request.auth.uid &&
-            (!exists(/databases/$(database)/documents/publicProfiles/$(slug)) || existing().uid == request.auth.uid) &&
+            (!('adminApproved' in incoming()) || incoming().adminApproved == false) &&
+            incoming().get('adminDisabled', false) == false)
+        );
+      allow update: if isValidId(slug) && isValidPublicProfile(incoming()) &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (isActiveUser() && incoming().uid == request.auth.uid &&
+            existing().uid == request.auth.uid &&
             (!('adminApproved' in incoming()) || incoming().adminApproved == false ||
-              (exists(/databases/$(database)/documents/publicProfiles/$(slug)) && existing().get('adminApproved', false) == true)) &&
-            ((!exists(/databases/$(database)/documents/publicProfiles/$(slug)) && incoming().get('adminDisabled', false) == false) ||
-              (exists(/databases/$(database)/documents/publicProfiles/$(slug)) && incoming().get('adminDisabled', false) == existing().get('adminDisabled', false))))
+              existing().get('adminApproved', false) == true) &&
+            incoming().get('adminDisabled', false) == existing().get('adminDisabled', false)) ||
+          (isPrinter() &&
+            incoming().uid == existing().uid &&
+            incoming().profileId == existing().profileId &&
+            incoming().slug == existing().slug &&
+            incoming().paymentConfirmed == true &&
+            incoming().isPublic == true &&
+            incoming().get('adminDisabled', false) == existing().get('adminDisabled', false) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['paymentConfirmed', 'isPublic', 'lastPaidOrderId', 'updatedAt']) &&
+            'lastPaidOrderId' in incoming() &&
+            isValidId(incoming().lastPaidOrderId) &&
+            exists(/databases/$(database)/documents/orders/$(incoming().lastPaidOrderId)) &&
+            get(/databases/$(database)/documents/orders/$(incoming().lastPaidOrderId)).data.printerId == request.auth.uid &&
+            get(/databases/$(database)/documents/orders/$(incoming().lastPaidOrderId)).data.orderStatus == 'Delivered' &&
+            get(/databases/$(database)/documents/orders/$(incoming().lastPaidOrderId)).data.profileId == existing().profileId)
         );
       allow delete: if isValidId(slug) && (isAdmin() || (isActiveUser() && existing().uid == request.auth.uid));
     }

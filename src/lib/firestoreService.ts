@@ -118,7 +118,12 @@ export function isOrderPaymentConfirmed(
       (!profileId && !profileSlug) ||
       (profileId && o.profileId === profileId) ||
       (profileSlug && o.profileSlug === profileSlug);
-    return Boolean(matchesProfile) && (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed');
+    return (
+      Boolean(matchesProfile) &&
+      (o.paymentStatus === 'Verified' ||
+        o.paymentStatus === 'Completed' ||
+        o.orderStatus === 'Delivered')
+    );
   });
 }
 
@@ -476,22 +481,6 @@ export async function saveProfileAndSyncPublic(
   const cleanSlug = sanitizeSlug(profile.slug);
   const updatedProfile: ProfileRecord = { ...profile, slug: cleanSlug };
 
-  batch.set(
-    doc(db, 'profiles', profile.profileId),
-    {
-      profileLabel: updatedProfile.profileLabel || 'Primary Business Profile',
-      slug: cleanSlug,
-      personalInformation: updatedProfile.personalInformation,
-      socialLinks: updatedProfile.socialLinks,
-      customFields: updatedProfile.customFields,
-      visibilitySettings: updatedProfile.visibilitySettings,
-      selectedTemplate: updatedProfile.selectedTemplate,
-      isPublic: updatedProfile.isPublic,
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true }
-  );
-
   let existingPaymentConfirmed = Boolean(profile.paymentConfirmed);
   let existingPaymentCompletedAt = profile.paymentCompletedAt || '';
   let existingLastPaidOrderId = '';
@@ -541,7 +530,7 @@ export async function saveProfileAndSyncPublic(
       const paidOrder = ownerOrders.find(
         (o) =>
           (o.profileId === profile.profileId || o.profileSlug === cleanSlug || (previousSlug && o.profileSlug === previousSlug)) &&
-          (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed')
+          (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed' || o.orderStatus === 'Delivered')
       );
       if (paidOrder) {
         existingPaymentConfirmed = true;
@@ -551,6 +540,23 @@ export async function saveProfileAndSyncPublic(
       // ignore if caller lacks order list access
     }
   }
+
+  batch.set(
+    doc(db, 'profiles', profile.profileId),
+    {
+      profileLabel: updatedProfile.profileLabel || 'Primary Business Profile',
+      slug: cleanSlug,
+      personalInformation: updatedProfile.personalInformation,
+      socialLinks: updatedProfile.socialLinks,
+      customFields: updatedProfile.customFields,
+      visibilitySettings: updatedProfile.visibilitySettings,
+      selectedTemplate: updatedProfile.selectedTemplate,
+      isPublic: updatedProfile.isPublic,
+      ...(existingPaymentConfirmed ? { paymentConfirmed: true } : {}),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
 
   if (previousSlug && previousSlug !== cleanSlug) {
     batch.delete(doc(db, 'publicProfiles', previousSlug));
@@ -1350,6 +1356,115 @@ export async function getOrderById(orderId: string): Promise<OrderRecord | null>
   }
 }
 
+export async function unlockProfileForOrder(
+  order: OrderRecord,
+  actorRole: UserRole
+): Promise<boolean> {
+  const isUnlockedOrder =
+    order.orderStatus === 'Delivered' ||
+    order.paymentStatus === 'Verified' ||
+    order.paymentStatus === 'Completed';
+  if (!isUnlockedOrder) return false;
+
+  const isPrivileged = actorRole === 'ADMIN' || actorRole === 'SUPERADMIN';
+  let linkedProfile: ProfileRecord | null = null;
+  if (order.profileId && actorRole !== 'PRINTER') {
+    linkedProfile = await getProfileById(order.profileId);
+    if (linkedProfile && (!linkedProfile.paymentConfirmed || !linkedProfile.isPublic) && !linkedProfile.adminDisabled) {
+      await updateDoc(doc(db, 'profiles', linkedProfile.profileId), {
+        paymentConfirmed: true,
+        isPublic: true,
+        updatedAt: serverTimestamp(),
+      }).catch(() => null);
+    }
+  }
+
+  const targetSlugs = new Set<string>();
+  if (order.profileSlug) {
+    const s = sanitizeSlug(order.profileSlug);
+    if (s) targetSlugs.add(s);
+  }
+  if (linkedProfile?.slug) {
+    const s = sanitizeSlug(linkedProfile.slug);
+    if (s) targetSlugs.add(s);
+  }
+
+  let updatedAny = false;
+  for (const targetSlug of targetSlugs) {
+    const pubRef = doc(db, 'publicProfiles', targetSlug);
+    const pubSnap = await getDoc(pubRef).catch(() => null);
+    if (pubSnap && pubSnap.exists()) {
+      const pubData = pubSnap.data() as PublicProfileRecord;
+      if (pubData.adminDisabled) continue;
+      if (!pubData.paymentConfirmed || !pubData.isPublic || pubData.lastPaidOrderId !== order.orderId) {
+        await updateDoc(pubRef, {
+          paymentConfirmed: true,
+          isPublic: true,
+          lastPaidOrderId: order.orderId,
+          updatedAt: serverTimestamp(),
+        }).catch(() => null);
+        updatedAny = true;
+      }
+    } else if (linkedProfile && (isPrivileged || actorRole === 'USER')) {
+      if (linkedProfile.adminDisabled) continue;
+      await setDoc(pubRef, {
+        ...buildSanitizedPublicProfile({ ...linkedProfile, slug: targetSlug, isPublic: true }),
+        paymentConfirmed: true,
+        isPublic: true,
+        adminDisabled: false,
+        lastPaidOrderId: order.orderId,
+        updatedAt: serverTimestamp(),
+      }).catch(() => null);
+      updatedAny = true;
+    }
+  }
+  return updatedAny;
+}
+
+export async function reconcileDeliveredOrdersToProfiles(
+  orders: OrderRecord[],
+  actorRole: UserRole,
+  profiles?: ProfileRecord[]
+): Promise<boolean> {
+  const unlockedOrders = orders.filter(
+    (o) =>
+      o.orderStatus === 'Delivered' ||
+      o.paymentStatus === 'Verified' ||
+      o.paymentStatus === 'Completed'
+  );
+  if (unlockedOrders.length === 0) return false;
+
+  const profileById = new Map<string, ProfileRecord>();
+  if (profiles) {
+    for (const p of profiles) {
+      profileById.set(p.profileId, p);
+    }
+  }
+
+  const seenProfileKeys = new Set<string>();
+  let anyReconciled = false;
+  for (const ord of unlockedOrders) {
+    const key = ord.profileId || ord.profileSlug || ord.orderId;
+    if (seenProfileKeys.has(key)) continue;
+    seenProfileKeys.add(key);
+
+    const knownProfile = ord.profileId ? profileById.get(ord.profileId) : undefined;
+    if (knownProfile?.adminDisabled) continue;
+    if (knownProfile && knownProfile.paymentConfirmed && knownProfile.isPublic && ord.profileSlug) {
+      // Still verify publicProfiles doc isn't missing paymentConfirmed/isPublic if needed
+      const pubSnap = await getDoc(doc(db, 'publicProfiles', sanitizeSlug(knownProfile.slug || ord.profileSlug))).catch(() => null);
+      if (pubSnap?.exists()) {
+        const pub = pubSnap.data() as PublicProfileRecord;
+        if ((pub.paymentConfirmed && pub.isPublic) || pub.adminDisabled) continue;
+      }
+    }
+
+    const changed = await unlockProfileForOrder(ord, actorRole).catch(() => false);
+    if (changed) anyReconciled = true;
+  }
+  return anyReconciled;
+}
+
 export async function updateOrderWorkflow(params: {
   orderId: string;
   updates: Partial<OrderRecord>;
@@ -1366,6 +1481,16 @@ export async function updateOrderWorkflow(params: {
       await updateDoc(doc(db, 'qrCodes', params.orderId), {
         printerId: params.updates.printerId,
       }).catch(() => null);
+    }
+    if (
+      params.updates.orderStatus === 'Delivered' ||
+      params.updates.paymentStatus === 'Verified' ||
+      params.updates.paymentStatus === 'Completed'
+    ) {
+      const ordSnap = await getDoc(doc(db, 'orders', params.orderId)).catch(() => null);
+      if (ordSnap?.exists()) {
+        await unlockProfileForOrder(ordSnap.data() as OrderRecord, params.actor.role).catch(() => null);
+      }
     }
     await recordAuditLog({
       actorUid: params.actor.uid,
@@ -1400,12 +1525,13 @@ export async function updateOrderAndPaymentStatus(params: {
   const paymentRef = doc(db, 'payments', params.order.orderId);
   try {
     const paySnap = await getDoc(paymentRef);
-    const isCompleted = params.paymentStatus === 'Completed' || params.paymentStatus === 'Verified';
+    const isPaymentDone = params.paymentStatus === 'Completed' || params.paymentStatus === 'Verified';
+    const isUnlocked = isPaymentDone || nextOrderStatus === 'Delivered';
     if (paySnap.exists()) {
       batch.update(paymentRef, {
         status: params.paymentStatus,
-        signatureVerified: isCompleted,
-        verifiedAt: isCompleted ? new Date().toISOString() : '',
+        signatureVerified: isPaymentDone,
+        verifiedAt: isPaymentDone ? new Date().toISOString() : '',
       });
     } else {
       batch.set(paymentRef, {
@@ -1415,11 +1541,11 @@ export async function updateOrderAndPaymentStatus(params: {
         gateway: 'razorpay_sandbox',
         gatewayOrderId: `manual_${params.order.orderNumber}`,
         gatewayPaymentId: '',
-        signatureVerified: isCompleted,
+        signatureVerified: isPaymentDone,
         amount: params.order.total,
         currency: 'INR',
         status: params.paymentStatus,
-        verifiedAt: isCompleted ? new Date().toISOString() : '',
+        verifiedAt: isPaymentDone ? new Date().toISOString() : '',
         createdAt: serverTimestamp(),
       });
     }
@@ -1435,6 +1561,18 @@ export async function updateOrderAndPaymentStatus(params: {
         if (linkedProfile.slug) {
           targetSlugs.add(sanitizeSlug(linkedProfile.slug));
         }
+        if (isUnlocked && !linkedProfile.adminDisabled) {
+          batch.update(doc(db, 'profiles', linkedProfile.profileId), {
+            paymentConfirmed: true,
+            isPublic: true,
+            updatedAt: serverTimestamp(),
+          });
+        } else if (!isUnlocked && linkedProfile.paymentConfirmed) {
+          batch.update(doc(db, 'profiles', linkedProfile.profileId), {
+            paymentConfirmed: false,
+            updatedAt: serverTimestamp(),
+          });
+        }
       }
     }
 
@@ -1444,15 +1582,20 @@ export async function updateOrderAndPaymentStatus(params: {
       const pubSnap = await getDoc(pubRef);
       if (pubSnap.exists()) {
         batch.update(pubRef, {
-          paymentConfirmed: isCompleted,
-          lastPaidOrderId: isCompleted ? params.order.orderId : '',
+          paymentConfirmed: isUnlocked,
+          ...(isUnlocked ? { isPublic: true } : {}),
+          lastPaidOrderId: isUnlocked ? params.order.orderId : '',
           updatedAt: serverTimestamp(),
         });
       } else if (linkedProfile) {
         batch.set(pubRef, {
-          ...buildSanitizedPublicProfile({ ...linkedProfile, slug: targetSlug }),
-          paymentConfirmed: isCompleted,
-          ...(isCompleted ? { lastPaidOrderId: params.order.orderId } : {}),
+          ...buildSanitizedPublicProfile({
+            ...linkedProfile,
+            slug: targetSlug,
+            isPublic: isUnlocked ? true : linkedProfile.isPublic,
+          }),
+          paymentConfirmed: isUnlocked,
+          ...(isUnlocked ? { lastPaidOrderId: params.order.orderId } : {}),
           updatedAt: serverTimestamp(),
         });
       }
@@ -1724,20 +1867,31 @@ export async function sendApprovedDesignToPrint(params: {
         createdAt: serverTimestamp(),
       });
     }
+  }
 
+  if (params.markPaymentCompleted || params.initialOrderStatus === 'Delivered') {
+    if (params.profile && !params.profile.adminDisabled) {
+      batch.update(doc(db, 'profiles', params.profile.profileId), {
+        paymentConfirmed: true,
+        isPublic: true,
+        updatedAt: serverTimestamp(),
+      });
+    }
     if (slug) {
       const pubRef = doc(db, 'publicProfiles', slug);
       const pubSnap = await getDoc(pubRef);
       if (pubSnap.exists()) {
         batch.update(pubRef, {
           paymentConfirmed: true,
+          isPublic: true,
           lastPaidOrderId: orderId,
           updatedAt: serverTimestamp(),
         });
       } else if (params.profile) {
         batch.set(pubRef, {
-          ...buildSanitizedPublicProfile({ ...params.profile, slug }),
+          ...buildSanitizedPublicProfile({ ...params.profile, slug, isPublic: true }),
           paymentConfirmed: true,
+          isPublic: true,
           lastPaidOrderId: orderId,
           updatedAt: serverTimestamp(),
         });

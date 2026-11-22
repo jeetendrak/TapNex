@@ -878,6 +878,69 @@ describe('Design Studio Layout Engine, Rich Bio Sanitizer & Link Controls', () =
       expect(src).not.toContain('>300 DPI PDF<');
     }
   });
+
+  it('treats Delivered orders as unlocked even with Pending payment, removes shield restrictions when live, and keeps /p/:slug public without login', () => {
+    const deliveredPendingOrder = {
+      orderId: 'ord_delivered_1',
+      orderNumber: 'TNX-2026-999001',
+      uid: 'user_1',
+      profileId: 'prof_personal',
+      profileSlug: 'personal',
+      designId: 'des_1',
+      quantity: 1,
+      cardType: 'Matte PVC SMART',
+      subtotal: 1200,
+      tax: 216,
+      shipping: 0,
+      total: 1416,
+      currency: 'INR' as const,
+      paymentStatus: 'Pending' as const,
+      orderStatus: 'Delivered' as const,
+      shippingAddress: {
+        fullName: 'Test User',
+        mobile: '+91 9876543210',
+        email: 'test@example.com',
+        addressLine1: 'MG Road',
+        city: 'Pune',
+        state: 'Maharashtra',
+        pinCode: '411001',
+        country: 'India',
+      },
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-02',
+    };
+
+    const inTransitPendingOrder = {
+      ...deliveredPendingOrder,
+      orderId: 'ord_transit_1',
+      orderStatus: 'In Transit' as const,
+    };
+
+    expect(isOrderPaymentConfirmed([deliveredPendingOrder], 'prof_personal')).toBe(true);
+    expect(isOrderPaymentConfirmed([deliveredPendingOrder], undefined, 'personal')).toBe(true);
+    expect(isOrderPaymentConfirmed([inTransitPendingOrder], 'prof_personal', 'personal')).toBe(false);
+
+    const publicProfileSrc = fs.readFileSync(
+      path.resolve(process.cwd(), 'src/pages/public/PublicProfilePage.tsx'),
+      'utf8'
+    );
+    expect(publicProfileSrc).toContain('<ScreenProtectionShield active={!isPaidLive}');
+    expect(publicProfileSrc).toContain('reconcileDeliveredOrdersToProfiles');
+
+    const customerProfileSrc = fs.readFileSync(
+      path.resolve(process.cwd(), 'src/pages/customer/CustomerProfilePages.tsx'),
+      'utf8'
+    );
+    expect(customerProfileSrc).toContain('active={!isPaid}');
+
+    const appSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/App.tsx'), 'utf8');
+    expect(appSrc).toContain('<Route path="/p/:slug" element={<PublicProfilePage />} />');
+
+    const rulesSrc = fs.readFileSync(path.resolve(process.cwd(), 'firestore.rules'), 'utf8');
+    expect(rulesSrc).toContain("orderStatus == 'Delivered'");
+    expect(rulesSrc).toContain('match /publicProfiles/{slug}');
+  });
 });
+
 
 

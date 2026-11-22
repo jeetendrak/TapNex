@@ -70,12 +70,14 @@ export const ScreenProtectionShield: React.FC<ScreenProtectionShieldProps> = ({
       setCaptureShielded(true);
     };
 
-    window.addEventListener('keydown', handleKeyDown, true);
-    window.addEventListener('keyup', (e) => {
+    const handleKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'PrintScreen' || e.code === 'PrintScreen') {
         triggerTemporaryShield();
       }
-    }, true);
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('keyup', handleKeyUp, true);
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('blur', handleWindowBlur);
     window.addEventListener('focus', handleWindowFocus);
@@ -83,6 +85,7 @@ export const ScreenProtectionShield: React.FC<ScreenProtectionShieldProps> = ({
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('keyup', handleKeyUp, true);
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('blur', handleWindowBlur);
       window.removeEventListener('focus', handleWindowFocus);

@@ -15,6 +15,7 @@ import {
   getPrinterOrders,
   getPublicProfileBySlug,
   getQrCodeById,
+  reconcileDeliveredOrdersToProfiles,
   sendAndLogTransactionalEmail,
   updateOrderWorkflow,
 } from '../../lib/firestoreService';
@@ -96,7 +97,10 @@ export const PrinterOrdersPage: React.FC = () => {
   useEffect(() => {
     if (!userRecord) return;
     getPrinterOrders(userRecord.uid)
-      .then(setOrders)
+      .then((ords) => {
+        setOrders(ords);
+        reconcileDeliveredOrdersToProfiles(ords, userRecord.role).catch(() => null);
+      })
       .finally(() => setLoading(false));
   }, [userRecord]);
 
@@ -191,6 +195,9 @@ export const PrinterOrderDetailPage: React.FC = () => {
         setDesign(des);
         setQr(qrDoc);
         setPublicProfile(pubDoc);
+        if (ord.orderStatus === 'Delivered' && userRecord && (!pubDoc?.paymentConfirmed || !pubDoc?.isPublic) && !pubDoc?.adminDisabled) {
+          reconcileDeliveredOrdersToProfiles([ord], userRecord.role).catch(() => null);
+        }
       }
     } finally {
       setLoading(false);

@@ -75,7 +75,9 @@ import {
   getSupportTickets,
   getUserById,
   getUserProfiles,
+  isOrderPaymentConfirmed,
   markProfilePaymentCompleted,
+  reconcileDeliveredOrdersToProfiles,
   saveCardTemplate,
   saveEmailTemplate,
   savePrinterRecord,
@@ -849,8 +851,15 @@ export const AdminUserDetailPage: React.FC = () => {
   const load = () => {
     if (!uid) return;
     getUserById(uid).then(setUser);
-    getUserProfiles(uid).then(setProfiles);
-    getAllOrders().then(setOrders);
+    Promise.all([getUserProfiles(uid), getAllOrders()]).then(([profs, ords]) => {
+      setProfiles(profs);
+      setOrders(ords);
+      if (userRecord) {
+        reconcileDeliveredOrdersToProfiles(ords, userRecord.role, profs).then((changed) => {
+          if (changed) getUserProfiles(uid).then(setProfiles);
+        });
+      }
+    });
   };
 
   useEffect(() => {
@@ -941,11 +950,7 @@ export const AdminUserDetailPage: React.FC = () => {
                 {profiles.map((p) => {
                   const paid =
                     Boolean(p.paymentConfirmed) ||
-                    orders.some(
-                      (o) =>
-                        o.profileId === p.profileId &&
-                        (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed')
-                    );
+                    isOrderPaymentConfirmed(orders, p.profileId, p.slug);
                   return (
                     <div key={p.profileId} className="p-4 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div>
@@ -1042,11 +1047,7 @@ export const AdminUserDetailPage: React.FC = () => {
           owner={user}
           paid={
             Boolean(inspectedProfile.paymentConfirmed) ||
-            orders.some(
-              (o) =>
-                o.profileId === inspectedProfile.profileId &&
-                (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed')
-            )
+            isOrderPaymentConfirmed(orders, inspectedProfile.profileId, inspectedProfile.slug)
           }
           onClose={() => setInspectedProfile(null)}
           onToggleApproval={handleToggleApproval}
@@ -1201,7 +1202,13 @@ export const AdminOrdersPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [paymentFilter, setPaymentFilter] = useState('ALL');
 
-  const load = () => getAllOrders().then(setOrders);
+  const load = () =>
+    getAllOrders().then((ords) => {
+      setOrders(ords);
+      if (userRecord) {
+        reconcileDeliveredOrdersToProfiles(ords, userRecord.role).catch(() => null);
+      }
+    });
   useEffect(() => { load(); }, []);
 
   const filtered = orders.filter((o) => {
@@ -1420,6 +1427,9 @@ export const AdminOrderDetailPage: React.FC = () => {
       setDesign(des);
       setProfile(prof);
       setQr(qrDoc);
+      if (ord.orderStatus === 'Delivered' && userRecord && (!prof?.paymentConfirmed || !prof?.isPublic) && !prof?.adminDisabled) {
+        reconcileDeliveredOrdersToProfiles([ord], userRecord.role, prof ? [prof] : undefined).catch(() => null);
+      }
     }
   };
   useEffect(() => { load(); }, [orderId]);
@@ -3132,6 +3142,11 @@ export const AdminProfilesPage: React.FC = () => {
         setProfiles(profs);
         setUsers(usrs);
         setOrders(ords);
+        if (userRecord) {
+          reconcileDeliveredOrdersToProfiles(ords, userRecord.role, profs).then((changed) => {
+            if (changed) getAllProfiles().then(setProfiles);
+          });
+        }
       })
       .finally(() => setLoading(false));
   };
@@ -3272,9 +3287,7 @@ export const AdminProfilesPage: React.FC = () => {
                   const owner = userMap.get(p.uid);
                   const paid =
                     Boolean(p.paymentConfirmed) ||
-                    orders.some(
-                      (o) => o.profileId === p.profileId && (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed')
-                    );
+                    isOrderPaymentConfirmed(orders, p.profileId, p.slug);
                   return (
                     <tr key={p.profileId}>
                       <td className="py-3 px-4">
@@ -3387,11 +3400,7 @@ export const AdminProfilesPage: React.FC = () => {
           owner={userMap.get(inspectedProfile.uid) || null}
           paid={
             Boolean(inspectedProfile.paymentConfirmed) ||
-            orders.some(
-              (o) =>
-                o.profileId === inspectedProfile.profileId &&
-                (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed')
-            )
+            isOrderPaymentConfirmed(orders, inspectedProfile.profileId, inspectedProfile.slug)
           }
           onClose={() => setInspectedProfile(null)}
           onToggleApproval={handleToggleApproval}
@@ -3509,7 +3518,9 @@ export const AdminApprovedDesignsPage: React.FC = () => {
     const tpl = templates.find((t) => t.templateId === design.templateId) || templates[0];
     const info = prof?.personalInformation;
     const isPaid =
-      linkedOrder?.paymentStatus === 'Verified' || linkedOrder?.paymentStatus === 'Completed';
+      linkedOrder?.paymentStatus === 'Verified' ||
+      linkedOrder?.paymentStatus === 'Completed' ||
+      linkedOrder?.orderStatus === 'Delivered';
 
     setPrintResult(null);
     setPrintPrinterId(linkedOrder?.printerId || 'admin_inhouse');
