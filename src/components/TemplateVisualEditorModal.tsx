@@ -50,17 +50,17 @@ const QUICK_TOKENS: { label: string; token: string; fontSizePt: number; bold?: b
 ];
 
 const SAMPLE_PREVIEW_PERSONA: Partial<PersonalInformation> = {
-  fullName: 'Aarav Mehta',
-  jobTitle: 'Managing Director',
-  companyName: 'TapNex Ventures',
-  businessCategory: 'Executive Consulting',
-  shortBio: 'Connecting teams with a single NFC tap.',
-  mobile: '+91 98201 44510',
-  whatsapp: '+91 98201 44510',
-  email: 'aarav@tapnex.in',
-  website: 'https://tapnex.in/p/aarav',
-  city: 'Mumbai',
-  state: 'Maharashtra',
+  fullName: 'Your Name',
+  jobTitle: 'Your Designation',
+  companyName: 'Your Company Name',
+  businessCategory: 'Your Business Category',
+  shortBio: 'Your Short Bio',
+  mobile: 'Your Number',
+  whatsapp: 'Your WhatsApp Number',
+  email: 'Your Email ID',
+  website: 'Your Website',
+  city: 'Your City',
+  state: 'State',
 };
 
 interface TemplateVisualEditorModalProps {
@@ -115,12 +115,19 @@ export const TemplateVisualEditorModal: React.FC<TemplateVisualEditorModalProps>
         ...currentSide,
         elements: currentSide.elements.map((el) => (el.id === target.id ? { ...el, xPct, yPct } : el)),
       });
+    } else if (target.kind === 'shape') {
+      setCurrentSide({
+        ...currentSide,
+        shapes: (currentSide.shapes || []).map((s) => (s.id === target.id ? { ...s, xPct, yPct } : s)),
+      });
     } else if (target.kind === 'logo') {
       setCurrentSide({ ...currentSide, logoX: xPct, logoY: yPct });
     } else if (target.kind === 'avatar') {
       setCurrentSide({ ...currentSide, avatarX: xPct, avatarY: yPct });
     } else if (target.kind === 'qr') {
       setCurrentSide({ ...currentSide, qrSlotX: xPct, qrSlotY: yPct });
+    } else if (target.kind === 'nfc') {
+      setCurrentSide({ ...currentSide, nfcX: xPct, nfcY: yPct });
     }
   };
 
@@ -319,7 +326,7 @@ export const TemplateVisualEditorModal: React.FC<TemplateVisualEditorModalProps>
                 onSelectTarget={(t) => {
                   setSelectedTarget(t);
                   if (t?.kind === 'text') setInspectorTab('text');
-                  else if (t?.kind === 'logo' || t?.kind === 'avatar' || t?.kind === 'qr') setInspectorTab('media');
+                  else if (t?.kind === 'logo' || t?.kind === 'avatar' || t?.kind === 'qr' || t?.kind === 'nfc') setInspectorTab('media');
                 }}
                 onMoveItem={handleMoveItem}
                 editingTextId={editingTextId}
@@ -618,9 +625,9 @@ export const TemplateVisualEditorModal: React.FC<TemplateVisualEditorModalProps>
                       ))}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       <div>
-                        <label className="text-[11px] text-slate-500">X Position: {selectedEl.xPct}%</label>
+                        <label className="text-[11px] text-slate-500">X Pos: {selectedEl.xPct}%</label>
                         <input
                           type="range"
                           min={2}
@@ -631,13 +638,24 @@ export const TemplateVisualEditorModal: React.FC<TemplateVisualEditorModalProps>
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-slate-500">Y Position: {selectedEl.yPct}%</label>
+                        <label className="text-[11px] text-slate-500">Y Pos: {selectedEl.yPct}%</label>
                         <input
                           type="range"
                           min={2}
                           max={88}
                           value={selectedEl.yPct}
                           onChange={(e) => updateSelectedEl({ yPct: Number(e.target.value) })}
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-slate-500">Width: {selectedEl.maxWidthPct || 82}%</label>
+                        <input
+                          type="range"
+                          min={15}
+                          max={95}
+                          value={selectedEl.maxWidthPct || 82}
+                          onChange={(e) => updateSelectedEl({ maxWidthPct: Number(e.target.value) })}
                           className="w-full"
                         />
                       </div>
@@ -724,25 +742,42 @@ export const TemplateVisualEditorModal: React.FC<TemplateVisualEditorModalProps>
                     </div>
                   )}
 
-                  <div className="pt-3 border-t border-slate-200 flex items-center justify-between gap-3">
-                    <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={currentSide.showNfcIcon}
-                        onChange={(e) => setCurrentSide({ ...currentSide, showNfcIcon: e.target.checked })}
-                        className="h-4 w-4 accent-[#1D4ED8]"
-                      />
-                      <Wifi className="h-3.5 w-3.5 text-[#1D4ED8]" />
-                      <span>Show NFC Contactless Icon</span>
-                    </label>
+                  <div className="pt-3 border-t border-slate-200 space-y-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={currentSide.showNfcIcon}
+                          onChange={(e) => setCurrentSide({ ...currentSide, showNfcIcon: e.target.checked })}
+                          className="h-4 w-4 accent-[#1D4ED8]"
+                        />
+                        <Wifi className="h-3.5 w-3.5 text-[#1D4ED8]" />
+                        <span>Show NFC Contactless Icon</span>
+                      </label>
+                      {currentSide.showNfcIcon && (
+                        <input
+                          type="color"
+                          value={currentSide.nfcIconColor || '#38BDF8'}
+                          onChange={(e) => setCurrentSide({ ...currentSide, nfcIconColor: e.target.value })}
+                          className="w-9 h-8 rounded border border-slate-300 cursor-pointer"
+                          title="NFC icon color"
+                        />
+                      )}
+                    </div>
                     {currentSide.showNfcIcon && (
-                      <input
-                        type="color"
-                        value={currentSide.nfcIconColor || '#38BDF8'}
-                        onChange={(e) => setCurrentSide({ ...currentSide, nfcIconColor: e.target.value })}
-                        className="w-9 h-8 rounded border border-slate-300 cursor-pointer"
-                        title="NFC icon color"
-                      />
+                      <div>
+                        <label className="block text-[11px] text-slate-600">
+                          NFC Icon Size: {currentSide.nfcSizeMm || 6} mm (drag NFC icon directly on card)
+                        </label>
+                        <input
+                          type="range"
+                          min={4}
+                          max={14}
+                          value={currentSide.nfcSizeMm || 6}
+                          onChange={(e) => setCurrentSide({ ...currentSide, nfcSizeMm: Number(e.target.value) })}
+                          className="w-full"
+                        />
+                      </div>
                     )}
                   </div>
                 </div>
@@ -829,7 +864,22 @@ export const TemplateVisualEditorModal: React.FC<TemplateVisualEditorModalProps>
                       onChange={(e) => setDraft({ ...draft, active: e.target.checked })}
                       className="h-4 w-4 accent-[#1D4ED8]"
                     />
-                    <span>Active in Customer Studio</span>
+                    <span>Visible to Users in Design Studio</span>
+                  </label>
+                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#0B1D3A] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(draft.isDefault)}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          isDefault: e.target.checked,
+                          active: e.target.checked ? true : draft.active,
+                        })
+                      }
+                      className="h-4 w-4 accent-amber-600"
+                    />
+                    <span>Set as Default Template</span>
                   </label>
                 </div>
               </div>

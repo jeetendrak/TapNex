@@ -29,6 +29,10 @@ import {
   Wifi,
   Sparkles,
   Check,
+  Layers,
+  Square,
+  Circle,
+  Minus,
 } from 'lucide-react';
 import { PortalLayout } from '../../components/PortalLayout';
 import { CardCanvasPreview, type CardCanvasTarget } from '../../components/CardCanvasPreview';
@@ -61,15 +65,22 @@ import { getActiveStudioDraft, saveActiveStudioDraft } from '../../lib/studioDra
 import { compressImageFileToDataUrl } from '../../lib/qrArtwork';
 import { resolveCardTokens } from '../../lib/printPdf';
 import {
+  BLANK_CARD_TEMPLATE,
   DEFAULT_CARD_TEMPLATES,
+  DEFAULT_PAYMENT_GATEWAYS,
   INDIAN_STATES,
+  PAYMENT_GATEWAY_ORDER,
 } from '../../lib/constants';
 import type {
   CardDesignRecord,
+  CardShapeElement,
   CardSideDesign,
   CardTemplateRecord,
   CardTextElement,
   OrderRecord,
+  PaymentGatewayConfig,
+  PaymentGatewayId,
+  PaymentRecord,
   ProfileRecord,
   QrCodeRecord,
   SupportTicketRecord,
@@ -142,6 +153,9 @@ interface ProfileCardFieldOption {
   defaultBold?: boolean;
 }
 
+const DEFAULT_STARTER_TEMPLATE =
+  DEFAULT_CARD_TEMPLATES.find((t) => t.isDefault) || DEFAULT_CARD_TEMPLATES[0];
+
 // 6. Business Card Design Studio (85.6 x 54 mm + Non-Scannable QR Placeholder)
 export const CustomerCardStudioPage: React.FC = () => {
   const { userRecord } = useAuth();
@@ -152,12 +166,12 @@ export const CustomerCardStudioPage: React.FC = () => {
   const [profiles, setProfiles] = useState<ProfileRecord[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<ProfileRecord | null>(null);
   const [mode, setMode] = useState<'default' | 'custom'>('default');
-  const [customizeTab, setCustomizeTab] = useState<'text' | 'background' | 'media' | 'qr'>('text');
-  const [selectedTpl, setSelectedTpl] = useState<CardTemplateRecord>(DEFAULT_CARD_TEMPLATES[0]);
+  const [customizeTab, setCustomizeTab] = useState<'text' | 'shapes' | 'background' | 'media' | 'qr'>('text');
+  const [selectedTpl, setSelectedTpl] = useState<CardTemplateRecord>(DEFAULT_STARTER_TEMPLATE);
   const [activeSide, setActiveSide] = useState<'front' | 'back'>('front');
   const [orientation, setOrientation] = useState<'landscape' | 'vertical'>('landscape');
-  const [frontDesign, setFrontDesign] = useState<CardSideDesign>(() => cloneSide(DEFAULT_CARD_TEMPLATES[0].frontSpec));
-  const [backDesign, setBackDesign] = useState<CardSideDesign>(() => cloneSide(DEFAULT_CARD_TEMPLATES[0].backSpec));
+  const [frontDesign, setFrontDesign] = useState<CardSideDesign>(() => cloneSide(DEFAULT_STARTER_TEMPLATE.frontSpec));
+  const [backDesign, setBackDesign] = useState<CardSideDesign>(() => cloneSide(DEFAULT_STARTER_TEMPLATE.backSpec));
   const [selectedTarget, setSelectedTarget] = useState<CardCanvasTarget | null>(null);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [fieldsDropdownOpen, setFieldsDropdownOpen] = useState(false);
@@ -168,8 +182,16 @@ export const CustomerCardStudioPage: React.FC = () => {
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const studioReadyRef = useRef(false);
   const fieldsDropdownRef = useRef<HTMLDivElement | null>(null);
+  const hiddenProfileElementsRef = useRef<{
+    front: { elements: CardTextElement[]; showAvatar: boolean };
+    back: { elements: CardTextElement[]; showAvatar: boolean };
+  }>({
+    front: { elements: [], showAvatar: false },
+    back: { elements: [], showAvatar: false },
+  });
 
   const selectedElementId = selectedTarget?.kind === 'text' ? selectedTarget.id : null;
+  const selectedShapeId = selectedTarget?.kind === 'shape' ? selectedTarget.id : null;
 
   useEffect(() => {
     if (!fieldsDropdownOpen) return;
@@ -195,8 +217,12 @@ export const CustomerCardStudioPage: React.FC = () => {
       ? extractTimestampMs(matchingSaved.updatedAt) || extractTimestampMs(matchingSaved.createdAt)
       : 0;
 
+    const defaultFallback = activeList.find((t) => t.isDefault) || activeList[0] || BLANK_CARD_TEMPLATE;
+
     if (localDraft && (!matchingSaved || localDraft.updatedMs >= savedMs)) {
-      const matchedTpl = activeList.find((t) => t.templateId === localDraft.templateId) || activeList[0];
+      const matchedTpl =
+        activeList.find((t) => t.templateId === localDraft.templateId) ||
+        (localDraft.templateId === BLANK_CARD_TEMPLATE.templateId ? BLANK_CARD_TEMPLATE : defaultFallback);
       setSelectedTpl(matchedTpl);
       setOrientation(localDraft.cardOrientation || 'landscape');
       const hydratedFront = cloneSide(localDraft.frontDesign);
@@ -205,7 +231,9 @@ export const CustomerCardStudioPage: React.FC = () => {
       setMode('custom');
       setSelectedTarget(hydratedFront.elements[0] ? { kind: 'text', id: hydratedFront.elements[0].id } : null);
     } else if (matchingSaved) {
-      const matchedTpl = activeList.find((t) => t.templateId === matchingSaved.templateId) || activeList[0];
+      const matchedTpl =
+        activeList.find((t) => t.templateId === matchingSaved.templateId) ||
+        (matchingSaved.templateId === BLANK_CARD_TEMPLATE.templateId ? BLANK_CARD_TEMPLATE : defaultFallback);
       setSelectedTpl(matchedTpl);
       setOrientation(matchingSaved.cardOrientation || 'landscape');
       const hydratedFront = cloneSide(matchingSaved.frontDesign);
@@ -214,13 +242,12 @@ export const CustomerCardStudioPage: React.FC = () => {
       setMode('custom');
       setSelectedTarget(hydratedFront.elements[0] ? { kind: 'text', id: hydratedFront.elements[0].id } : null);
     } else {
-      const firstTpl = activeList[0];
+      const firstTpl = defaultFallback;
       setSelectedTpl(firstTpl);
       const initialFront = cloneSide(firstTpl.frontSpec);
       if (prof?.personalInformation?.photoDataUrl) {
         initialFront.avatarDataUrl = prof.personalInformation.photoDataUrl;
-        initialFront.showAvatar = true;
-        initialFront.avatarSizeMm = initialFront.avatarSizeMm || 13;
+        initialFront.avatarSizeMm = initialFront.avatarSizeMm || 15;
       }
       setFrontDesign(initialFront);
       setBackDesign(cloneSide(firstTpl.backSpec));
@@ -233,7 +260,7 @@ export const CustomerCardStudioPage: React.FC = () => {
     studioReadyRef.current = false;
     Promise.all([getCardTemplates(), getUserProfiles(userRecord.uid), getUserDesigns(userRecord.uid)]).then(
       ([tpls, profs, userDesigns]) => {
-        const activeList = tpls.length > 0 ? tpls : DEFAULT_CARD_TEMPLATES;
+        const activeList = tpls;
         setTemplates(activeList);
         const preferredProfileId = localStorage.getItem(`tapnex_active_profile_${userRecord.uid}`);
         const firstProf = profs.find((p) => p.profileId === preferredProfileId) || profs[0] || null;
@@ -268,38 +295,47 @@ export const CustomerCardStudioPage: React.FC = () => {
     setFrontDesign((prev) => ({
       ...prev,
       avatarDataUrl: prev.avatarDataUrl || profilePhoto,
-      showAvatar: prev.avatarDataUrl ? prev.showAvatar : true,
-      avatarSizeMm: prev.avatarSizeMm || 13,
+      avatarSizeMm: prev.avatarSizeMm || 15,
     }));
   }, [selectedProfile]);
 
-  const applyTemplate = (tpl: CardTemplateRecord) => {
+  const allDropdownTemplates: CardTemplateRecord[] = [
+    ...templates.filter((t) => t.templateId !== BLANK_CARD_TEMPLATE.templateId),
+    BLANK_CARD_TEMPLATE,
+  ];
+
+  const applyTemplate = (tpl: CardTemplateRecord, enterCustomMode = false) => {
     setSelectedTpl(tpl);
     const nextFront = cloneSide(tpl.frontSpec);
-    if (selectedProfile?.personalInformation?.photoDataUrl) {
+    if (selectedProfile?.personalInformation?.photoDataUrl && !nextFront.avatarDataUrl) {
       nextFront.avatarDataUrl = selectedProfile.personalInformation.photoDataUrl;
-      nextFront.showAvatar = true;
-      nextFront.avatarSizeMm = nextFront.avatarSizeMm || 13;
+      nextFront.avatarSizeMm = nextFront.avatarSizeMm || 15;
     }
     setFrontDesign(nextFront);
     setBackDesign(cloneSide(tpl.backSpec));
     if (!tpl.supportsVertical && orientation === 'vertical') {
       setOrientation('landscape');
     }
+    if (enterCustomMode) {
+      setMode('custom');
+    }
     const activeElements = activeSide === 'front' ? nextFront.elements : tpl.backSpec.elements;
     setSelectedTarget(
-      mode === 'custom' && activeElements[0] ? { kind: 'text', id: activeElements[0].id } : null
+      (enterCustomMode || mode === 'custom') && activeElements[0]
+        ? { kind: 'text', id: activeElements[0].id }
+        : null
     );
     setEditingTextId(null);
   };
 
   const handleLoadDefaultSettings = () => {
-    const baseTpl = templates.find((t) => t.templateId === selectedTpl.templateId) || DEFAULT_CARD_TEMPLATES[0];
+    const defaultFallback = templates.find((t) => t.isDefault) || templates[0] || BLANK_CARD_TEMPLATE;
+    const baseTpl =
+      allDropdownTemplates.find((t) => t.templateId === selectedTpl.templateId) || defaultFallback;
     const nextFront = cloneSide(baseTpl.frontSpec);
-    if (selectedProfile?.personalInformation?.photoDataUrl) {
+    if (selectedProfile?.personalInformation?.photoDataUrl && !nextFront.avatarDataUrl) {
       nextFront.avatarDataUrl = selectedProfile.personalInformation.photoDataUrl;
-      nextFront.showAvatar = true;
-      nextFront.avatarSizeMm = 13;
+      nextFront.avatarSizeMm = nextFront.avatarSizeMm || 15;
     }
     setFrontDesign(nextFront);
     setBackDesign(cloneSide(baseTpl.backSpec));
@@ -318,6 +354,7 @@ export const CustomerCardStudioPage: React.FC = () => {
   };
 
   const selectedEl = currentSide.elements.find((e) => e.id === selectedElementId) || null;
+  const selectedShape = (currentSide.shapes || []).find((s) => s.id === selectedShapeId) || null;
 
   const updateElementTextById = (id: string, nextText: string) => {
     const updater = (side: CardSideDesign): CardSideDesign => ({
@@ -336,6 +373,55 @@ export const CustomerCardStudioPage: React.FC = () => {
     });
   };
 
+  const updateSelectedShape = (patch: Partial<CardShapeElement>) => {
+    if (!selectedShape) return;
+    setCurrentSide({
+      ...currentSide,
+      shapes: (currentSide.shapes || []).map((s) => (s.id === selectedShape.id ? { ...s, ...patch } : s)),
+    });
+  };
+
+  const addShapeElement = (kind: CardShapeElement['kind']) => {
+    const id = `shp_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+    const defaultAccent = isLightHexColor(currentSide.backgroundColor) ? '#0B1D3A' : '#D4AF37';
+    const newShape: CardShapeElement =
+      kind === 'line'
+        ? { id, kind: 'line', xPct: 8, yPct: 50, widthPct: 40, heightPct: 1.5, color: defaultAccent }
+        : kind === 'circle'
+        ? { id, kind: 'circle', xPct: 36, yPct: 24, widthPct: 24, heightPct: 38, color: defaultAccent, opacity: 0.9 }
+        : kind === 'pill'
+        ? { id, kind: 'pill', xPct: 12, yPct: 72, widthPct: 36, heightPct: 11, color: defaultAccent }
+        : { id, kind: 'rect', xPct: 0, yPct: 78, widthPct: 100, heightPct: 14, color: defaultAccent, borderRadiusPx: 0 };
+    setCurrentSide({
+      ...currentSide,
+      shapes: [...(currentSide.shapes || []), newShape],
+    });
+    setSelectedTarget({ kind: 'shape', id });
+    setMode('custom');
+    setCustomizeTab('shapes');
+  };
+
+  const duplicateSelectedShape = () => {
+    if (!selectedShape) return;
+    const id = `shp_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+    const copy: CardShapeElement = {
+      ...selectedShape,
+      id,
+      xPct: Math.min(82, selectedShape.xPct + 4),
+      yPct: Math.min(82, selectedShape.yPct + 6),
+    };
+    setCurrentSide({ ...currentSide, shapes: [...(currentSide.shapes || []), copy] });
+    setSelectedTarget({ kind: 'shape', id });
+  };
+
+  const removeShapeById = (id: string) => {
+    setCurrentSide({
+      ...currentSide,
+      shapes: (currentSide.shapes || []).filter((s) => s.id !== id),
+    });
+    if (selectedShapeId === id) setSelectedTarget(null);
+  };
+
   const handleSelectTarget = (t: CardCanvasTarget | null) => {
     setSelectedTarget(t);
     if (!t) {
@@ -344,8 +430,9 @@ export const CustomerCardStudioPage: React.FC = () => {
     }
     setMode('custom');
     if (t.kind === 'text') setCustomizeTab('text');
+    else if (t.kind === 'shape') setCustomizeTab('shapes');
     else if (t.kind === 'avatar' || t.kind === 'logo') setCustomizeTab('media');
-    else if (t.kind === 'qr') setCustomizeTab('qr');
+    else if (t.kind === 'qr' || t.kind === 'nfc') setCustomizeTab('qr');
   };
 
   const handleCanvasMove = (target: CardCanvasTarget, xPct: number, yPct: number) => {
@@ -354,12 +441,71 @@ export const CustomerCardStudioPage: React.FC = () => {
         ...currentSide,
         elements: currentSide.elements.map((el) => (el.id === target.id ? { ...el, xPct, yPct } : el)),
       });
+    } else if (target.kind === 'shape') {
+      setCurrentSide({
+        ...currentSide,
+        shapes: (currentSide.shapes || []).map((s) => (s.id === target.id ? { ...s, xPct, yPct } : s)),
+      });
     } else if (target.kind === 'logo') {
       setCurrentSide({ ...currentSide, logoX: xPct, logoY: yPct });
     } else if (target.kind === 'avatar') {
       setCurrentSide({ ...currentSide, avatarX: xPct, avatarY: yPct });
     } else if (target.kind === 'qr') {
       setCurrentSide({ ...currentSide, qrSlotX: xPct, qrSlotY: yPct });
+    } else if (target.kind === 'nfc') {
+      setCurrentSide({ ...currentSide, nfcX: xPct, nfcY: yPct });
+    }
+  };
+
+  const handleStartBlankCard = () => {
+    const blankFront = cloneSide(BLANK_CARD_TEMPLATE.frontSpec);
+    const blankBack = cloneSide(BLANK_CARD_TEMPLATE.backSpec);
+    setSelectedTpl(BLANK_CARD_TEMPLATE);
+    setFrontDesign(blankFront);
+    setBackDesign(blankBack);
+    setActiveSide('front');
+    setMode('custom');
+    setCustomizeTab('background');
+    setSelectedTarget(null);
+    setEditingTextId(null);
+    notify(
+      'Blank card canvas ready',
+      'Upload separate Front & Back designs or add text, shapes, logos, photos, NFC & QR icons.',
+      'success'
+    );
+  };
+
+  const handleSideDesignUpload = async (targetSide: 'front' | 'back', e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      notify('Image too large', 'Please upload a PNG/JPG under 5 MB.', 'error');
+      return;
+    }
+    try {
+      const dataUrl = await compressImageFileToDataUrl(file, {
+        maxWidth: orientation === 'vertical' ? 709 : 1082,
+        maxHeight: orientation === 'vertical' ? 1082 : 709,
+        maxChars: 280_000,
+      });
+      if (targetSide === 'front') {
+        setFrontDesign((prev) => ({ ...prev, backgroundImageUrl: dataUrl }));
+      } else {
+        setBackDesign((prev) => ({ ...prev, backgroundImageUrl: dataUrl }));
+      }
+      setActiveSide(targetSide);
+      setMode('custom');
+      setCustomizeTab('background');
+      setSelectedTarget(null);
+      setEditingTextId(null);
+      notify(
+        `${targetSide === 'front' ? 'Front' : 'Back'} card design uploaded`,
+        `Applied to ${targetSide} side only. All text, shapes, logo, photo, NFC & QR elements remain editable.`,
+        'success'
+      );
+    } catch {
+      notify('Upload failed', 'Could not read template image file.', 'error');
     }
   };
 
@@ -447,12 +593,74 @@ export const CustomerCardStudioPage: React.FC = () => {
       defaultFontSizePt: 8,
     }));
 
-  const filledFieldOptions = [...builtInFieldOptions, ...customFieldOptions].filter((opt) => Boolean(opt.previewValue.trim()));
+  const allProfileFieldOptions = [...builtInFieldOptions, ...customFieldOptions];
+  const filledFieldOptions = allProfileFieldOptions.filter((opt) => Boolean(opt.previewValue.trim()));
 
   const isFieldOnCurrentSide = (opt: ProfileCardFieldOption): boolean =>
     currentSide.elements.some((el) => el.text.trim() === opt.insertText.trim());
 
-  const activeFieldCount = filledFieldOptions.filter(isFieldOnCurrentSide).length;
+  const profileInsertTokenSet = new Set(allProfileFieldOptions.map((o) => o.insertText.trim()));
+  const activeProfileElementsOnSide = currentSide.elements.filter((el) =>
+    profileInsertTokenSet.has(el.text.trim())
+  );
+  const displayProfileDataChecked = activeProfileElementsOnSide.length > 0 || Boolean(currentSide.showAvatar);
+
+  const activeFieldCount = allProfileFieldOptions.filter(isFieldOnCurrentSide).length;
+
+  const toggleDisplayAllProfileData = (checked: boolean) => {
+    if (!checked) {
+      hiddenProfileElementsRef.current[activeSide] = {
+        elements: activeProfileElementsOnSide,
+        showAvatar: Boolean(currentSide.showAvatar),
+      };
+      setCurrentSide({
+        ...currentSide,
+        showAvatar: false,
+        elements: currentSide.elements.filter((el) => !profileInsertTokenSet.has(el.text.trim())),
+      });
+      return;
+    }
+    const backup = hiddenProfileElementsRef.current[activeSide];
+    if (backup && (backup.elements.length > 0 || backup.showAvatar)) {
+      const existingIds = new Set(currentSide.elements.map((e) => e.id));
+      const restored = backup.elements.filter((e) => !existingIds.has(e.id));
+      setCurrentSide({
+        ...currentSide,
+        showAvatar: backup.showAvatar || Boolean(pi?.photoDataUrl),
+        avatarDataUrl: currentSide.avatarDataUrl || pi?.photoDataUrl,
+        elements: [...currentSide.elements, ...restored],
+      });
+      return;
+    }
+    const baseList = filledFieldOptions.length > 0 ? filledFieldOptions : builtInFieldOptions.slice(0, 5);
+    const toAdd: CardTextElement[] = [];
+    let running = [...currentSide.elements];
+    for (const opt of baseList) {
+      if (running.some((el) => el.text.trim() === opt.insertText.trim())) continue;
+      const pos = getNextCleanTextPosition(running);
+      const item: CardTextElement = {
+        id: `fld_${opt.key}_${Date.now().toString(36)}_${toAdd.length}`,
+        text: opt.insertText,
+        xPct: pos.xPct,
+        yPct: pos.yPct,
+        fontSizePt: opt.defaultFontSizePt,
+        fontFamily: 'Plus Jakarta Sans',
+        fontWeight: opt.defaultBold ? 'bold' : 'normal',
+        fontStyle: 'normal',
+        textDecoration: 'none',
+        color: getDefaultContrastColor(),
+        align: 'left',
+      };
+      running.push(item);
+      toAdd.push(item);
+    }
+    setCurrentSide({
+      ...currentSide,
+      showAvatar: Boolean(pi?.photoDataUrl) || Boolean(currentSide.showAvatar),
+      avatarDataUrl: currentSide.avatarDataUrl || pi?.photoDataUrl,
+      elements: running,
+    });
+  };
 
   const toggleProfileFieldOnCard = (opt: ProfileCardFieldOption) => {
     const existing = currentSide.elements.find((el) => el.text.trim() === opt.insertText.trim());
@@ -480,7 +688,10 @@ export const CustomerCardStudioPage: React.FC = () => {
     setMode('custom');
   };
 
-  const handleBackgroundUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleBackgroundUploadForSide = async (
+    targetSide: 'front' | 'back',
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
@@ -498,8 +709,17 @@ export const CustomerCardStudioPage: React.FC = () => {
         maxHeight: orientation === 'vertical' ? 1082 : 709,
         maxChars: 280_000,
       });
-      setCurrentSide({ ...currentSide, backgroundImageUrl: dataUrl });
-      notify('Background applied & locked', 'Fits card dimensions automatically. Replace or Remove anytime.', 'success');
+      if (targetSide === 'front') {
+        setFrontDesign((prev) => ({ ...prev, backgroundImageUrl: dataUrl }));
+      } else {
+        setBackDesign((prev) => ({ ...prev, backgroundImageUrl: dataUrl }));
+      }
+      setActiveSide(targetSide);
+      notify(
+        `${targetSide === 'front' ? 'Front' : 'Back'} background updated`,
+        'Fits card dimensions automatically. Replace or Remove anytime.',
+        'success'
+      );
     } catch {
       notify('Background upload failed', 'Could not read image. Please try PNG or JPG.', 'error');
     }
@@ -620,7 +840,38 @@ export const CustomerCardStudioPage: React.FC = () => {
               2. Customize Card
             </button>
 
-            {/* Profile Info Dropdown (Zero-clutter selector for already-filled profile data) */}
+            <button
+              type="button"
+              onClick={() => handleStartBlankCard()}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-800 hover:bg-slate-50 text-xs font-semibold min-h-[38px]"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-[#1D4ED8]" />
+              <span>Blank Canvas</span>
+            </button>
+
+            <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-[#1D4ED8] bg-blue-50/70 text-[#1D4ED8] hover:bg-blue-100 text-xs font-semibold min-h-[38px] cursor-pointer">
+              <Upload className="h-3.5 w-3.5" />
+              <span>Upload Front Design</span>
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => handleSideDesignUpload('front', e)}
+              />
+            </label>
+
+            <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-emerald-600 bg-emerald-50/70 text-emerald-700 hover:bg-emerald-100 text-xs font-semibold min-h-[38px] cursor-pointer">
+              <Upload className="h-3.5 w-3.5" />
+              <span>Upload Back Design</span>
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => handleSideDesignUpload('back', e)}
+              />
+            </label>
+
+            {/* Profile Info Dropdown (Checkbox selector for saved profile data) */}
             <div className="relative" ref={fieldsDropdownRef}>
               <button
                 type="button"
@@ -628,7 +879,7 @@ export const CustomerCardStudioPage: React.FC = () => {
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 text-xs font-semibold min-h-[38px]"
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>Profile Info on {activeSide === 'front' ? 'Front' : 'Back'}</span>
+                <span>Profile Data on {activeSide === 'front' ? 'Front' : 'Back'}</span>
                 <span className="px-1.5 py-0.5 rounded bg-indigo-600 text-white text-[10px] font-bold tabular-nums">
                   {activeFieldCount}
                 </span>
@@ -637,81 +888,78 @@ export const CustomerCardStudioPage: React.FC = () => {
 
               {fieldsDropdownOpen && (
                 <div className="absolute left-0 mt-2 w-80 max-w-[90vw] bg-white border border-slate-200 rounded-xl shadow-xl z-40 p-3 space-y-2">
-                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                  <label className="flex items-center justify-between gap-2 pb-2 border-b border-slate-100 cursor-pointer">
                     <div>
                       <div className="text-xs font-bold text-[#0B1D3A]">
-                        Select Profile Fields ({activeSide === 'front' ? 'Front Side' : 'Back Side'})
+                        Display Profile Data on {activeSide === 'front' ? 'Front' : 'Back'}
                       </div>
                       <div className="text-[11px] text-slate-500">
-                        Check items from your saved profile to add/remove instantly
+                        Check fields below to display on card
                       </div>
                     </div>
-                  </div>
+                    <input
+                      type="checkbox"
+                      checked={displayProfileDataChecked}
+                      onChange={(e) => toggleDisplayAllProfileData(e.target.checked)}
+                      className="h-4 w-4 accent-[#1D4ED8]"
+                    />
+                  </label>
 
                   {/* Quick Photo Toggle */}
-                  {pi?.photoDataUrl && (
-                    <label className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-slate-50 hover:bg-slate-100 cursor-pointer border border-slate-200">
-                      <div className="flex items-center gap-2 min-w-0">
+                  <label className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-slate-50 hover:bg-slate-100 cursor-pointer border border-slate-200">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {pi?.photoDataUrl ? (
                         <img src={pi.photoDataUrl} alt="" className="w-6 h-6 rounded-full object-cover shrink-0 border border-slate-300" />
-                        <div className="min-w-0">
-                          <div className="text-xs font-semibold text-[#0B1D3A]">Profile Photo</div>
-                          <div className="text-[10px] text-slate-500">Show photo on {activeSide} side</div>
-                        </div>
+                      ) : (
+                        <UserCircle2 className="w-5 h-5 text-slate-400 shrink-0" />
+                      )}
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-[#0B1D3A]">Profile Photo</div>
+                        <div className="text-[10px] text-slate-500">Show photo frame on {activeSide} side</div>
                       </div>
-                      <input
-                        type="checkbox"
-                        checked={Boolean(currentSide.showAvatar && (currentSide.avatarDataUrl || pi.photoDataUrl))}
-                        onChange={(e) =>
-                          setCurrentSide({
-                            ...currentSide,
-                            avatarDataUrl: currentSide.avatarDataUrl || pi.photoDataUrl,
-                            showAvatar: e.target.checked,
-                          })
-                        }
-                        className="h-4 w-4 accent-[#1D4ED8]"
-                      />
-                    </label>
-                  )}
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(currentSide.showAvatar)}
+                      onChange={(e) =>
+                        setCurrentSide({
+                          ...currentSide,
+                          avatarDataUrl: currentSide.avatarDataUrl || pi?.photoDataUrl || '',
+                          showAvatar: e.target.checked,
+                        })
+                      }
+                      className="h-4 w-4 accent-[#1D4ED8]"
+                    />
+                  </label>
 
-                  {filledFieldOptions.length === 0 ? (
-                    <div className="p-3 text-xs text-slate-500 text-center">
-                      No filled profile details yet. Update{' '}
-                      <Link to="/dashboard/profile" className="text-[#1D4ED8] underline font-medium">
-                        My Profile
-                      </Link>{' '}
-                      first.
-                    </div>
-                  ) : (
-                    <div className="max-h-64 overflow-y-auto space-y-1 pr-1">
-                      {filledFieldOptions.map((opt) => {
-                        const checked = isFieldOnCurrentSide(opt);
-                        return (
-                          <button
-                            key={opt.key}
-                            type="button"
-                            onClick={() => toggleProfileFieldOnCard(opt)}
-                            className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-left transition-colors ${
-                              checked
-                                ? 'bg-blue-50 border border-blue-200 text-[#0B1D3A]'
-                                : 'hover:bg-slate-50 border border-transparent text-slate-700'
-                            }`}
-                          >
-                            <div className="min-w-0">
-                              <div className="text-xs font-semibold truncate">{opt.label}</div>
-                              <div className="text-[11px] text-slate-500 truncate">{opt.previewValue}</div>
+                  <div className="max-h-64 overflow-y-auto space-y-1 pr-1">
+                    {allProfileFieldOptions.map((opt) => {
+                      const checked = isFieldOnCurrentSide(opt);
+                      return (
+                        <label
+                          key={opt.key}
+                          className={`w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer ${
+                            checked
+                              ? 'bg-blue-50 border border-blue-200 text-[#0B1D3A]'
+                              : 'hover:bg-slate-50 border border-transparent text-slate-700'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold truncate">{opt.label}</div>
+                            <div className="text-[11px] text-slate-500 truncate">
+                              {opt.previewValue || 'Uses placeholder until filled in My Profile'}
                             </div>
-                            <span
-                              className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border ${
-                                checked ? 'bg-[#1D4ED8] border-[#1D4ED8] text-white' : 'border-slate-300 bg-white'
-                              }`}
-                            >
-                              {checked && <Check className="h-3 w-3" />}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                          </div>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleProfileFieldOnCard(opt)}
+                            className="h-4 w-4 accent-[#1D4ED8] shrink-0"
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
@@ -754,7 +1002,34 @@ export const CustomerCardStudioPage: React.FC = () => {
             </button>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* All Templates Dropdown (applied directly to Customized Design) */}
+            <div className="flex items-center gap-1.5">
+              <label htmlFor="studio-template-dropdown" className="text-[11px] font-semibold text-slate-500">
+                Template:
+              </label>
+              <select
+                id="studio-template-dropdown"
+                value={selectedTpl.templateId}
+                onChange={(e) => {
+                  const found = allDropdownTemplates.find((t) => t.templateId === e.target.value);
+                  if (found) {
+                    applyTemplate(found, true);
+                    notify('Template applied to custom studio', `Customizing ${found.name} — click any component to edit.`, 'info');
+                  }
+                }}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold text-[#0B1D3A] bg-white min-w-[200px]"
+              >
+                {allDropdownTemplates.map((tpl) => (
+                  <option key={tpl.templateId} value={tpl.templateId}>
+                    {tpl.isDefault ? '★ ' : ''}
+                    {tpl.name}
+                    {tpl.isDefault ? ' [Default]' : ''} ({tpl.category || 'Card'} · ₹{tpl.priceInr})
+                  </option>
+                ))}
+              </select>
+            </div>
+
             {profiles.length > 0 && (
               <select
                 value={selectedProfile?.profileId || ''}
@@ -1031,22 +1306,43 @@ export const CustomerCardStudioPage: React.FC = () => {
               <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3.5 flex flex-wrap items-center justify-between gap-3">
                 <span className="text-xs font-bold text-[#0B1D3A]">Selected: Profile Photo ({currentSide.avatarSizeMm || 13} mm)</span>
                 <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg p-0.5">
+                    {(['circle', 'rounded', 'square'] as const).map((shp) => (
+                      <button
+                        key={shp}
+                        type="button"
+                        onClick={() => setCurrentSide({ ...currentSide, avatarShape: shp })}
+                        className={`px-2 py-1 rounded text-[11px] font-semibold capitalize ${
+                          (currentSide.avatarShape || 'circle') === shp
+                            ? 'bg-[#0B1D3A] text-white'
+                            : 'text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        {shp}
+                      </button>
+                    ))}
+                  </div>
                   <input
                     type="range"
                     min={8}
-                    max={24}
+                    max={28}
                     value={currentSide.avatarSizeMm || 13}
                     onChange={(e) => setCurrentSide({ ...currentSide, avatarSizeMm: Number(e.target.value) })}
-                    className="w-28"
+                    className="w-24"
                   />
-                  {currentSide.avatarDataUrl && (
+                  <label className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">
+                    <Upload className="h-3.5 w-3.5" />
+                    <span>Upload</span>
+                    <input type="file" accept="image/*" className="hidden" onChange={handleStudioPhotoUpload} />
+                  </label>
+                  {(currentSide.avatarDataUrl || pi?.photoDataUrl) && (
                     <button
                       type="button"
-                      onClick={() => setPhotoCropSource(currentSide.avatarDataUrl || null)}
+                      onClick={() => setPhotoCropSource(currentSide.avatarDataUrl || pi?.photoDataUrl || null)}
                       className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-blue-300 bg-white text-xs font-semibold text-[#1D4ED8] hover:bg-blue-50"
                     >
                       <Crop className="h-3.5 w-3.5" />
-                      <span>Crop / Resize</span>
+                      <span>Crop</span>
                     </button>
                   )}
                   <button
@@ -1058,6 +1354,42 @@ export const CustomerCardStudioPage: React.FC = () => {
                     className="px-2.5 py-1.5 rounded-lg border border-rose-200 bg-white text-xs font-semibold text-rose-600"
                   >
                     Hide Photo
+                  </button>
+                </div>
+              </div>
+            ) : selectedShape ? (
+              <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3.5 flex flex-wrap items-center justify-between gap-2.5">
+                <span className="text-xs font-bold text-[#0B1D3A]">
+                  Selected Shape ({selectedShape.kind})
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="color"
+                    value={selectedShape.color === 'transparent' ? '#FFFFFF' : selectedShape.color}
+                    onChange={(e) => updateSelectedShape({ color: e.target.value, gradientTo: '' })}
+                    className="w-8 h-7 rounded border border-slate-300 cursor-pointer"
+                    title="Shape color"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setCustomizeTab('shapes')}
+                    className="px-2.5 py-1.5 rounded-lg border border-blue-300 bg-white text-xs font-semibold text-[#1D4ED8] hover:bg-blue-50"
+                  >
+                    Size / Rotate / Border
+                  </button>
+                  <button
+                    type="button"
+                    onClick={duplicateSelectedShape}
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Duplicate
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeShapeById(selectedShape.id)}
+                    className="px-2.5 py-1.5 rounded-lg border border-rose-200 bg-white text-xs font-semibold text-rose-600"
+                  >
+                    Delete
                   </button>
                 </div>
               </div>
@@ -1109,12 +1441,45 @@ export const CustomerCardStudioPage: React.FC = () => {
                   </button>
                 </div>
               </div>
+            ) : selectedTarget?.kind === 'nfc' ? (
+              <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3.5 flex flex-wrap items-center justify-between gap-3">
+                <span className="text-xs font-bold text-[#0B1D3A]">
+                  Selected: NFC Wave Icon ({currentSide.nfcSizeMm || 6} mm)
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="range"
+                    min={3}
+                    max={14}
+                    step={0.5}
+                    value={currentSide.nfcSizeMm || 6}
+                    onChange={(e) => setCurrentSide({ ...currentSide, nfcSizeMm: Number(e.target.value) })}
+                    className="w-28"
+                  />
+                  <input
+                    type="color"
+                    value={currentSide.nfcIconColor || '#38BDF8'}
+                    onChange={(e) => setCurrentSide({ ...currentSide, nfcIconColor: e.target.value })}
+                    className="w-7 h-7 rounded border border-slate-300 cursor-pointer"
+                    title="NFC Icon Color"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCurrentSide({ ...currentSide, showNfcIcon: false });
+                      setSelectedTarget(null);
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg border border-rose-200 bg-white text-xs font-semibold text-rose-600"
+                  >
+                    Hide NFC Icon
+                  </button>
+                </div>
+              </div>
             ) : (
               <div className="rounded-xl bg-blue-50/70 border border-blue-200 p-3.5 text-xs text-slate-700 flex items-start gap-2.5">
                 <QrCode className="h-4 w-4 text-[#1D4ED8] shrink-0 mt-0.5" />
                 <span>
-                  Use <strong>Profile Info</strong> above to pick your saved details without re-typing, click{' '}
-                  <strong>Add Custom Text</strong>, or <strong>double-click</strong> any label on the card to edit. Your verified scannable QR replaces the placeholder box after payment.
+                  Choose any template from the <strong>Template</strong> dropdown, upload separate <strong>Front</strong> &amp; <strong>Back</strong> designs, check <strong>Profile Data</strong> fields, and click or drag any element on the card to edit.
                 </span>
               </div>
             )}
@@ -1123,12 +1488,43 @@ export const CustomerCardStudioPage: React.FC = () => {
           {/* Right Panel: Template Picker or Tabbed Visual Editor */}
           <div className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 space-y-5">
             {mode === 'default' ? (
-              <div>
-                <h2 className="font-display font-bold text-base text-[#0B1D3A] mb-3">
-                  Select Predefined Card Design
-                </h2>
-                <div className="grid grid-cols-2 gap-2.5">
-                  {templates.map((tpl) => {
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="font-display font-bold text-base text-[#0B1D3A]">
+                    Select Predefined or Blank Template
+                  </h2>
+                  <span className="text-[11px] font-mono text-slate-500">
+                    {allDropdownTemplates.length} templates
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                    Quick Template Dropdown (Loads into Customized Design)
+                  </label>
+                  <select
+                    value={selectedTpl.templateId}
+                    onChange={(e) => {
+                      const found = allDropdownTemplates.find((t) => t.templateId === e.target.value);
+                      if (found) {
+                        applyTemplate(found, true);
+                        notify('Template loaded for customization', `Edit any component on ${found.name}.`, 'info');
+                      }
+                    }}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold text-[#0B1D3A] bg-white"
+                  >
+                    {allDropdownTemplates.map((tpl) => (
+                      <option key={tpl.templateId} value={tpl.templateId}>
+                        {tpl.isDefault ? '★ ' : ''}
+                        {tpl.name}
+                        {tpl.isDefault ? ' [Default]' : ''} — {tpl.category || 'Standard'} (₹{tpl.priceInr})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5 max-h-[360px] overflow-y-auto pr-1">
+                  {allDropdownTemplates.map((tpl) => {
                     const active = selectedTpl.templateId === tpl.templateId;
                     return (
                       <button
@@ -1144,20 +1540,53 @@ export const CustomerCardStudioPage: React.FC = () => {
                             className="w-4 h-4 rounded-full border border-slate-300 shrink-0"
                             style={{ backgroundColor: tpl.frontSpec.backgroundColor }}
                           />
-                          <span className="font-mono text-xs font-bold text-[#0B1D3A] tabular-nums">
-                            ₹{tpl.priceInr}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            {tpl.isDefault && (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[9px] font-bold">
+                                Default
+                              </span>
+                            )}
+                            <span className="font-mono text-xs font-bold text-[#0B1D3A] tabular-nums">
+                              ₹{tpl.priceInr}
+                            </span>
+                          </div>
                         </div>
                         <div className="mt-2 font-display text-xs font-bold text-[#0B1D3A] truncate">
                           {tpl.name}
                         </div>
-                        <div className="text-[11px] text-slate-500 truncate">{tpl.cardType}</div>
+                        <div className="text-[11px] text-slate-500 truncate">{tpl.cardType || tpl.category}</div>
                       </button>
                     );
                   })}
                 </div>
-                <p className="mt-3 text-xs text-slate-500">
-                  Switch to <strong>2. Customize Card</strong> or click/drag any element on the preview to adjust fonts, photos, background, or QR position.
+
+                <div className="p-3.5 rounded-xl border border-dashed border-slate-300 bg-slate-50 space-y-2.5">
+                  <div className="text-xs font-semibold text-[#0B1D3A]">Upload Custom Front &amp; Back Card Artwork</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <label className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#0B1D3A] text-white text-xs font-semibold cursor-pointer hover:bg-[#132A52]">
+                      <Upload className="h-3.5 w-3.5" />
+                      <span>Upload Front Design</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => handleSideDesignUpload('front', e)}
+                      />
+                    </label>
+                    <label className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-700 text-white text-xs font-semibold cursor-pointer hover:bg-emerald-800">
+                      <Upload className="h-3.5 w-3.5" />
+                      <span>Upload Back Design</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => handleSideDesignUpload('back', e)}
+                      />
+                    </label>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Switch to <strong>2. Customize Card</strong> or click/drag any element on the preview to adjust text, shapes, photos, logo, NFC icon, or QR position.
                 </p>
               </div>
             ) : (
@@ -1176,12 +1605,13 @@ export const CustomerCardStudioPage: React.FC = () => {
                   </button>
                 </div>
 
-                {/* Clean 4-Tab Studio Inspector Navigation */}
-                <div className="grid grid-cols-4 gap-1 p-1 bg-slate-100 rounded-xl">
+                {/* Clean 5-Tab Studio Inspector Navigation */}
+                <div className="grid grid-cols-5 gap-1 p-1 bg-slate-100 rounded-xl">
                   {(
                     [
-                      { id: 'text', label: 'Text & Info' },
-                      { id: 'background', label: 'Background' },
+                      { id: 'text', label: 'Text & Data' },
+                      { id: 'shapes', label: 'Shapes' },
+                      { id: 'background', label: 'Front / Back' },
                       { id: 'media', label: 'Photo / Logo' },
                       { id: 'qr', label: 'QR & NFC' },
                     ] as const
@@ -1190,7 +1620,7 @@ export const CustomerCardStudioPage: React.FC = () => {
                       key={t.id}
                       type="button"
                       onClick={() => setCustomizeTab(t.id)}
-                      className={`py-2 px-1 rounded-lg text-[11px] font-semibold transition-colors ${
+                      className={`py-2 px-1 rounded-lg text-[10.5px] font-semibold transition-colors ${
                         customizeTab === t.id ? 'bg-white text-[#0B1D3A] shadow-xs' : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
@@ -1444,9 +1874,9 @@ export const CustomerCardStudioPage: React.FC = () => {
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200">
+                        <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-200">
                           <div>
-                            <label className="text-[11px] text-slate-500">Horizontal X: {selectedEl.xPct}%</label>
+                            <label className="text-[11px] text-slate-500">X: {selectedEl.xPct}%</label>
                             <input
                               type="range"
                               min={2}
@@ -1457,7 +1887,7 @@ export const CustomerCardStudioPage: React.FC = () => {
                             />
                           </div>
                           <div>
-                            <label className="text-[11px] text-slate-500">Vertical Y: {selectedEl.yPct}%</label>
+                            <label className="text-[11px] text-slate-500">Y: {selectedEl.yPct}%</label>
                             <input
                               type="range"
                               min={2}
@@ -1467,62 +1897,438 @@ export const CustomerCardStudioPage: React.FC = () => {
                               className="w-full"
                             />
                           </div>
+                          <div>
+                            <label className="text-[11px] text-slate-500">Box Width: {selectedEl.maxWidthPct ?? 88}%</label>
+                            <input
+                              type="range"
+                              min={20}
+                              max={96}
+                              value={selectedEl.maxWidthPct ?? 88}
+                              onChange={(e) => updateSelectedEl({ maxWidthPct: Number(e.target.value) })}
+                              className="w-full"
+                            />
+                          </div>
                         </div>
                       </div>
                     ) : (
                       <p className="text-xs text-slate-500 px-1">
-                        Click a text chip above or any text directly on the card preview to edit text, font style, color, bold, italic, underline, or alignment.
+                        Click a text chip above or any text directly on the card preview to edit text, font style, size, width, color, bold, italic, underline, or alignment.
+                      </p>
+                    )}
+                    {/* Profile Data Checklist Card */}
+                    <div className="p-3.5 rounded-xl border border-indigo-200 bg-indigo-50/50 space-y-2.5">
+                      <label className="flex items-center justify-between gap-2 cursor-pointer">
+                        <div>
+                          <div className="text-xs font-bold text-[#0B1D3A]">
+                            Display Profile Data on {activeSide === 'front' ? 'Front' : 'Back'} Side
+                          </div>
+                          <div className="text-[11px] text-slate-600">
+                            Toggle saved profile fields to show or hide on this card side
+                          </div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={displayProfileDataChecked}
+                          onChange={(e) => toggleDisplayAllProfileData(e.target.checked)}
+                          className="h-4 w-4 accent-[#1D4ED8] shrink-0"
+                        />
+                      </label>
+
+                      <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto pr-1 pt-1 border-t border-indigo-100">
+                        <label
+                          className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border text-[11px] cursor-pointer ${
+                            currentSide.showAvatar
+                              ? 'bg-white border-blue-300 text-[#0B1D3A] font-semibold'
+                              : 'bg-white/60 border-slate-200 text-slate-600'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={Boolean(currentSide.showAvatar)}
+                            onChange={(e) =>
+                              setCurrentSide({
+                                ...currentSide,
+                                avatarDataUrl: currentSide.avatarDataUrl || pi?.photoDataUrl || '',
+                                showAvatar: e.target.checked,
+                              })
+                            }
+                            className="h-3.5 w-3.5 accent-[#1D4ED8] shrink-0"
+                          />
+                          <span className="truncate">Profile Photo</span>
+                        </label>
+                        {allProfileFieldOptions.map((opt) => {
+                          const checked = isFieldOnCurrentSide(opt);
+                          return (
+                            <label
+                              key={opt.key}
+                              title={opt.previewValue || 'Not filled yet in My Profile'}
+                              className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border text-[11px] cursor-pointer ${
+                                checked
+                                  ? 'bg-white border-blue-300 text-[#0B1D3A] font-semibold'
+                                  : 'bg-white/60 border-slate-200 text-slate-600'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleProfileFieldOnCard(opt)}
+                                className="h-3.5 w-3.5 accent-[#1D4ED8] shrink-0"
+                              />
+                              <span className="truncate">{opt.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {customizeTab === 'shapes' && (
+                  <div className="space-y-3.5">
+                    <div className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-[#0B1D3A] flex items-center gap-1.5">
+                          <Layers className="h-3.5 w-3.5 text-[#1D4ED8]" />
+                          <span>Card Shapes &amp; Accents ({(currentSide.shapes || []).length})</span>
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => addShapeElement('rect')}
+                          className="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-[11px] font-semibold text-slate-700"
+                        >
+                          <Square className="h-3 w-3" />
+                          <span>+ Panel</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => addShapeElement('circle')}
+                          className="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-[11px] font-semibold text-slate-700"
+                        >
+                          <Circle className="h-3 w-3" />
+                          <span>+ Circle</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => addShapeElement('pill')}
+                          className="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-[11px] font-semibold text-slate-700"
+                        >
+                          <Sparkles className="h-3 w-3" />
+                          <span>+ Badge</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => addShapeElement('line')}
+                          className="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-[11px] font-semibold text-slate-700"
+                        >
+                          <Minus className="h-3 w-3" />
+                          <span>+ Line</span>
+                        </button>
+                      </div>
+
+                      {(currentSide.shapes || []).length === 0 ? (
+                        <p className="text-xs text-slate-500">
+                          No shapes on this side yet. Add a panel, circle, badge, or divider line above.
+                        </p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {(currentSide.shapes || []).map((shp, idx) => {
+                            const active = shp.id === selectedShapeId;
+                            return (
+                              <button
+                                key={shp.id}
+                                type="button"
+                                onClick={() => setSelectedTarget({ kind: 'shape', id: shp.id })}
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border ${
+                                  active
+                                    ? 'bg-[#0B1D3A] text-white border-[#0B1D3A]'
+                                    : 'bg-white text-slate-700 border-slate-300'
+                                }`}
+                              >
+                                <span
+                                  className="w-2.5 h-2.5 rounded-full border border-slate-300"
+                                  style={{ backgroundColor: shp.color === 'transparent' ? '#FFFFFF' : shp.color }}
+                                />
+                                <span>
+                                  {shp.kind} #{idx + 1}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {selectedShape ? (
+                      <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-[#0B1D3A]">Edit Selected Shape</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={duplicateSelectedShape}
+                              className="text-slate-600 hover:text-[#0B1D3A] text-[11px] font-semibold inline-flex items-center gap-0.5"
+                            >
+                              <Copy className="h-3 w-3" />
+                              <span>Copy</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeShapeById(selectedShape.id)}
+                              className="text-rose-600 hover:text-rose-700 text-[11px] font-semibold inline-flex items-center gap-0.5"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                              <span>Remove</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2.5">
+                          <div>
+                            <label className="block text-[11px] text-slate-600 mb-1">Shape Style</label>
+                            <select
+                              value={selectedShape.kind}
+                              onChange={(e) =>
+                                updateSelectedShape({ kind: e.target.value as CardShapeElement['kind'] })
+                              }
+                              className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white"
+                            >
+                              <option value="rect">Rectangle / Panel</option>
+                              <option value="circle">Circle / Ring</option>
+                              <option value="pill">Pill Badge</option>
+                              <option value="line">Divider Line</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[11px] text-slate-600 mb-1">Fill &amp; Transparent</label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="color"
+                                value={selectedShape.color === 'transparent' ? '#FFFFFF' : selectedShape.color}
+                                onChange={(e) => updateSelectedShape({ color: e.target.value })}
+                                className="w-8 h-7 rounded border border-slate-300 cursor-pointer"
+                              />
+                              <label className="inline-flex items-center gap-1 text-[11px] text-slate-600 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedShape.color === 'transparent'}
+                                  onChange={(e) =>
+                                    updateSelectedShape({ color: e.target.checked ? 'transparent' : '#D4AF37' })
+                                  }
+                                />
+                                <span>Outline Only</span>
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2.5">
+                          <div>
+                            <label className="block text-[11px] text-slate-600">
+                              Width: {selectedShape.widthPct}%
+                            </label>
+                            <input
+                              type="range"
+                              min={1}
+                              max={120}
+                              value={selectedShape.widthPct}
+                              onChange={(e) => updateSelectedShape({ widthPct: Number(e.target.value) })}
+                              className="w-full"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] text-slate-600">
+                              Height: {selectedShape.heightPct}%
+                            </label>
+                            <input
+                              type="range"
+                              min={1}
+                              max={130}
+                              value={selectedShape.heightPct}
+                              onChange={(e) => updateSelectedShape({ heightPct: Number(e.target.value) })}
+                              className="w-full"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] text-slate-600">X: {selectedShape.xPct}%</label>
+                            <input
+                              type="range"
+                              min={-25}
+                              max={95}
+                              value={selectedShape.xPct}
+                              onChange={(e) => updateSelectedShape({ xPct: Number(e.target.value) })}
+                              className="w-full"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] text-slate-600">Y: {selectedShape.yPct}%</label>
+                            <input
+                              type="range"
+                              min={-25}
+                              max={95}
+                              value={selectedShape.yPct}
+                              onChange={(e) => updateSelectedShape({ yPct: Number(e.target.value) })}
+                              className="w-full"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] text-slate-600">
+                              Rotation: {selectedShape.rotationDeg || 0}°
+                            </label>
+                            <input
+                              type="range"
+                              min={-45}
+                              max={45}
+                              value={selectedShape.rotationDeg || 0}
+                              onChange={(e) => updateSelectedShape({ rotationDeg: Number(e.target.value) })}
+                              className="w-full"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] text-slate-600">
+                              Border Width: {selectedShape.borderWidthPx || 0}px
+                            </label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="range"
+                                min={0}
+                                max={6}
+                                value={selectedShape.borderWidthPx || 0}
+                                onChange={(e) => updateSelectedShape({ borderWidthPx: Number(e.target.value) })}
+                                className="w-full"
+                              />
+                              <input
+                                type="color"
+                                value={selectedShape.borderColor || '#FFFFFF'}
+                                onChange={(e) => updateSelectedShape({ borderColor: e.target.value })}
+                                className="w-7 h-6 rounded border border-slate-300 shrink-0"
+                                title="Border color"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500 px-1">
+                        Click any shape/accent chip above or click directly on a bar, panel, or ring on the card to move, resize, recolor, or remove it.
                       </p>
                     )}
                   </div>
                 )}
 
                 {customizeTab === 'background' && (
-                  <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 space-y-3">
+                  <div className="space-y-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5 text-xs font-semibold text-[#0B1D3A]">
                         <ImageIcon className="h-3.5 w-3.5 text-[#1D4ED8]" />
-                        <span>Card Background ({activeSide === 'front' ? 'Front' : 'Back'})</span>
+                        <span>Separate Front &amp; Back Card Uploads / Backgrounds</span>
                       </div>
                       <span
-                        title="Recommended size: 1082 × 709 px (Landscape) or 709 × 1082 px (Vertical) at 300 DPI, 1.59:1 ratio, max 2 MB."
+                        title="Recommended size: 1082 × 709 px (Landscape) or 709 × 1082 px (Vertical) at 300 DPI, max 5 MB."
                         className="inline-flex items-center gap-1 text-[11px] text-slate-500 cursor-help"
                       >
                         <Info className="h-3.5 w-3.5 text-[#1D4ED8]" />
-                        <span>Size guide</span>
+                        <span>300 DPI guide</span>
                       </span>
                     </div>
 
-                    <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2.5 leading-relaxed">
-                      <strong>Recommended:</strong>{' '}
-                      {orientation === 'vertical' ? '709 × 1082 px' : '1082 × 709 px'} at 300 DPI (max 2 MB JPG/PNG). Background auto-fits to card dimensions and <strong>cannot be moved or resized</strong> once applied — only replaced or removed.
-                    </p>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] text-slate-600">Solid Color:</span>
-                        <input
-                          type="color"
-                          value={currentSide.backgroundColor}
-                          onChange={(e) => setCurrentSide({ ...currentSide, backgroundColor: e.target.value, gradientTo: '' })}
-                          className="w-9 h-8 rounded border border-slate-300 cursor-pointer"
-                        />
+                    {/* Front Card Design / Background Box */}
+                    <div
+                      className={`p-3.5 rounded-xl border space-y-2.5 ${
+                        activeSide === 'front' ? 'border-[#1D4ED8] bg-blue-50/40' : 'border-slate-200 bg-slate-50/60'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-[#0B1D3A]">Front Card Background / Design</span>
+                        {frontDesign.backgroundImageUrl && (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                            Image Uploaded
+                          </span>
+                        )}
                       </div>
-                      <label className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-medium cursor-pointer hover:bg-slate-50">
-                        <Upload className="h-3.5 w-3.5" />
-                        <span>{currentSide.backgroundImageUrl ? 'Replace Background' : 'Upload Background'}</span>
-                        <input type="file" accept="image/*" className="hidden" onChange={handleBackgroundUpload} />
-                      </label>
-                      {currentSide.backgroundImageUrl && (
-                        <button
-                          type="button"
-                          onClick={() => setCurrentSide({ ...currentSide, backgroundImageUrl: '' })}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-rose-200 bg-white text-rose-600 rounded-lg text-xs font-medium hover:bg-rose-50"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          <span>Remove</span>
-                        </button>
-                      )}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] text-slate-600">Color:</span>
+                          <input
+                            type="color"
+                            value={frontDesign.backgroundColor}
+                            onChange={(e) =>
+                              setFrontDesign((prev) => ({ ...prev, backgroundColor: e.target.value, gradientTo: '' }))
+                            }
+                            className="w-8 h-7 rounded border border-slate-300 cursor-pointer"
+                          />
+                        </div>
+                        <label className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-[#1D4ED8] bg-white text-[#1D4ED8] rounded-lg text-xs font-semibold cursor-pointer hover:bg-blue-50">
+                          <Upload className="h-3.5 w-3.5" />
+                          <span>{frontDesign.backgroundImageUrl ? 'Replace Front Image' : 'Upload Front Image'}</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => handleBackgroundUploadForSide('front', e)}
+                          />
+                        </label>
+                        {frontDesign.backgroundImageUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setFrontDesign((prev) => ({ ...prev, backgroundImageUrl: '' }))}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-rose-200 bg-white text-rose-600 rounded-lg text-xs font-medium hover:bg-rose-50"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            <span>Remove</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Back Card Design / Background Box */}
+                    <div
+                      className={`p-3.5 rounded-xl border space-y-2.5 ${
+                        activeSide === 'back' ? 'border-emerald-600 bg-emerald-50/40' : 'border-slate-200 bg-slate-50/60'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-[#0B1D3A]">Back Card Background / Design</span>
+                        {backDesign.backgroundImageUrl && (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                            Image Uploaded
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] text-slate-600">Color:</span>
+                          <input
+                            type="color"
+                            value={backDesign.backgroundColor}
+                            onChange={(e) =>
+                              setBackDesign((prev) => ({ ...prev, backgroundColor: e.target.value, gradientTo: '' }))
+                            }
+                            className="w-8 h-7 rounded border border-slate-300 cursor-pointer"
+                          />
+                        </div>
+                        <label className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-emerald-600 bg-white text-emerald-700 rounded-lg text-xs font-semibold cursor-pointer hover:bg-emerald-50">
+                          <Upload className="h-3.5 w-3.5" />
+                          <span>{backDesign.backgroundImageUrl ? 'Replace Back Image' : 'Upload Back Image'}</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => handleBackgroundUploadForSide('back', e)}
+                          />
+                        </label>
+                        {backDesign.backgroundImageUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setBackDesign((prev) => ({ ...prev, backgroundImageUrl: '' }))}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-rose-200 bg-white text-rose-600 rounded-lg text-xs font-medium hover:bg-rose-50"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            <span>Remove</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1564,16 +2370,42 @@ export const CustomerCardStudioPage: React.FC = () => {
                           <span>Crop / Resize Photo</span>
                         </button>
                       )}
-                      {currentSide.avatarDataUrl && (
-                        <button
-                          type="button"
-                          onClick={() => setCurrentSide({ ...currentSide, showAvatar: !currentSide.showAvatar })}
-                          className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium"
-                        >
-                          {currentSide.showAvatar ? 'Hide Photo' : 'Show Photo'}
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCurrentSide({
+                            ...currentSide,
+                            avatarDataUrl: currentSide.avatarDataUrl || pi?.photoDataUrl || '',
+                            showAvatar: !currentSide.showAvatar,
+                          })
+                        }
+                        className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium hover:bg-slate-50"
+                      >
+                        {currentSide.showAvatar ? 'Hide Photo Frame' : 'Show Photo Frame'}
+                      </button>
                     </div>
+
+                    {currentSide.showAvatar && (
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <span className="text-[11px] font-medium text-slate-600">Photo Frame Shape:</span>
+                        <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg p-0.5">
+                          {(['circle', 'rounded', 'square'] as const).map((shp) => (
+                            <button
+                              key={shp}
+                              type="button"
+                              onClick={() => setCurrentSide({ ...currentSide, avatarShape: shp })}
+                              className={`px-2.5 py-1 rounded text-[11px] font-semibold capitalize ${
+                                (currentSide.avatarShape || 'circle') === shp
+                                  ? 'bg-[#0B1D3A] text-white'
+                                  : 'text-slate-600 hover:bg-slate-100'
+                              }`}
+                            >
+                              {shp}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     <div className="pt-2 border-t border-slate-200 flex flex-wrap gap-2">
                       <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium cursor-pointer hover:bg-slate-50">
@@ -1612,9 +2444,9 @@ export const CustomerCardStudioPage: React.FC = () => {
                       )}
                     </div>
 
-                    {(currentSide.showAvatar && currentSide.avatarDataUrl) || currentSide.logoDataUrl ? (
+                    {currentSide.showAvatar || currentSide.logoDataUrl ? (
                       <div className="grid grid-cols-2 gap-3 pt-1">
-                        {currentSide.showAvatar && currentSide.avatarDataUrl && (
+                        {currentSide.showAvatar && (
                           <div>
                             <label className="block text-[11px] text-slate-600">
                               Photo Size ({currentSide.avatarSizeMm || 13} mm)
@@ -1622,7 +2454,7 @@ export const CustomerCardStudioPage: React.FC = () => {
                             <input
                               type="range"
                               min={8}
-                              max={24}
+                              max={28}
                               value={currentSide.avatarSizeMm || 13}
                               onChange={(e) => setCurrentSide({ ...currentSide, avatarSizeMm: Number(e.target.value) })}
                               className="w-full"
@@ -1703,26 +2535,68 @@ export const CustomerCardStudioPage: React.FC = () => {
                       )}
                     </div>
 
-                    {/* NFC Symbol Settings */}
-                    <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 flex items-center justify-between gap-3">
-                      <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#0B1D3A] cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={currentSide.showNfcIcon}
-                          onChange={(e) => setCurrentSide({ ...currentSide, showNfcIcon: e.target.checked })}
-                        />
-                        <Wifi className="h-3.5 w-3.5 text-[#1D4ED8] rotate-90" />
-                        <span>Show NFC Wave Icon</span>
-                      </label>
-                      {currentSide.showNfcIcon && (
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[11px] text-slate-500">Color:</span>
+                    {/* NFC Symbol Settings (Full Position & Size Control) */}
+                    <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 space-y-2.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#0B1D3A] cursor-pointer">
                           <input
-                            type="color"
-                            value={currentSide.nfcIconColor || '#38BDF8'}
-                            onChange={(e) => setCurrentSide({ ...currentSide, nfcIconColor: e.target.value })}
-                            className="w-8 h-7 rounded border border-slate-300 cursor-pointer"
+                            type="checkbox"
+                            checked={currentSide.showNfcIcon}
+                            onChange={(e) => setCurrentSide({ ...currentSide, showNfcIcon: e.target.checked })}
                           />
+                          <Wifi className="h-3.5 w-3.5 text-[#1D4ED8] rotate-90" />
+                          <span>Show NFC Wave Icon (Draggable)</span>
+                        </label>
+                        {currentSide.showNfcIcon && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-slate-500">Color:</span>
+                            <input
+                              type="color"
+                              value={currentSide.nfcIconColor || '#38BDF8'}
+                              onChange={(e) => setCurrentSide({ ...currentSide, nfcIconColor: e.target.value })}
+                              className="w-8 h-7 rounded border border-slate-300 cursor-pointer"
+                            />
+                          </div>
+                        )}
+                      </div>
+                      {currentSide.showNfcIcon && (
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-[11px] text-slate-600">
+                              Size ({currentSide.nfcSizeMm || 6}mm)
+                            </label>
+                            <input
+                              type="range"
+                              min={3}
+                              max={14}
+                              step={0.5}
+                              value={currentSide.nfcSizeMm || 6}
+                              onChange={(e) => setCurrentSide({ ...currentSide, nfcSizeMm: Number(e.target.value) })}
+                              className="w-full"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] text-slate-600">X ({currentSide.nfcX ?? 88}%)</label>
+                            <input
+                              type="range"
+                              min={4}
+                              max={92}
+                              value={currentSide.nfcX ?? 88}
+                              onChange={(e) => setCurrentSide({ ...currentSide, nfcX: Number(e.target.value) })}
+                              className="w-full"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] text-slate-600">Y ({currentSide.nfcY ?? 12}%)</label>
+                            <input
+                              type="range"
+                              min={4}
+                              max={90}
+                              value={currentSide.nfcY ?? 12}
+                              onChange={(e) => setCurrentSide({ ...currentSide, nfcY: Number(e.target.value) })}
+                              className="w-full"
+                            />
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1828,7 +2702,7 @@ export const CustomerCardStudioPage: React.FC = () => {
   );
 };
 
-// 7. Checkout & Razorpay Server-Verified Payment Flow
+// 7. Checkout & Multi-Gateway Server-Verified Payment Flow
 export const CustomerCheckoutPage: React.FC = () => {
   const { userRecord, appSettings } = useAuth();
   const { notify } = useToast();
@@ -1838,12 +2712,24 @@ export const CustomerCheckoutPage: React.FC = () => {
 
   const [design, setDesign] = useState<CardDesignRecord | null>(null);
   const [profile, setProfile] = useState<ProfileRecord | null>(null);
-  const [template, setTemplate] = useState<CardTemplateRecord>(DEFAULT_CARD_TEMPLATES[0]);
+  const [template, setTemplate] = useState<CardTemplateRecord>(
+    DEFAULT_CARD_TEMPLATES.find((t) => t.isDefault) || DEFAULT_CARD_TEMPLATES[0]
+  );
   const [quantity, setQuantity] = useState(1);
-  const [paymentMode, setPaymentMode] = useState<'live' | 'sandbox'>('sandbox');
   const [processing, setProcessing] = useState(false);
   const [previewSide, setPreviewSide] = useState<'front' | 'back'>('front');
   const [checkoutPreviewOpen, setCheckoutPreviewOpen] = useState(false);
+  const [selectedGatewayId, setSelectedGatewayId] = useState<PaymentGatewayId>('razorpay');
+  const [upiModal, setUpiModal] = useState<{
+    orderId: string;
+    orderNumber: string;
+    gateway: PaymentGatewayId;
+    mode: PaymentRecord['gateway'];
+    gatewayOrderId: string;
+    upiUri: string;
+    upiQrPngDataUrl: string;
+    utrInput: string;
+  } | null>(null);
 
   const [shipping, setShipping] = useState({
     fullName: '',
@@ -1857,21 +2743,25 @@ export const CustomerCheckoutPage: React.FC = () => {
     country: 'India',
   });
 
+  const configuredGateways: PaymentGatewayConfig[] = PAYMENT_GATEWAY_ORDER.map(
+    (id) => appSettings.paymentGateways?.[id] || DEFAULT_PAYMENT_GATEWAYS[id]
+  ).filter((g) => g.enabled);
+
   useEffect(() => {
-    fetch('/api/health')
-      .then((r) => r.json())
-      .then((h: { integrations?: { razorpayMode?: 'live' | 'sandbox' } }) => {
-        if (h.integrations?.razorpayMode) setPaymentMode(h.integrations.razorpayMode);
-      })
-      .catch(() => null);
-  }, []);
+    if (configuredGateways.length > 0 && !configuredGateways.some((g) => g.id === selectedGatewayId)) {
+      setSelectedGatewayId(configuredGateways[0].id);
+    }
+  }, [appSettings.paymentGateways, configuredGateways.length, selectedGatewayId]);
+
+  const activeGatewayConfig =
+    configuredGateways.find((g) => g.id === selectedGatewayId) || configuredGateways[0] || null;
 
   useEffect(() => {
     if (!userRecord) return;
     Promise.all([
       designId ? getCardDesignById(designId) : getUserDesigns(userRecord.uid).then((d) => d[0] || null),
       getUserProfiles(userRecord.uid),
-      getCardTemplates(),
+      getCardTemplates(true),
     ]).then(([des, profs, tpls]) => {
       setDesign(des);
       const prof = profs.find((p) => p.profileId === des?.profileId) || profs[0] || null;
@@ -1888,7 +2778,7 @@ export const CustomerCheckoutPage: React.FC = () => {
           pinCode: prev.pinCode || prof.personalInformation.pinCode || '',
         }));
       }
-      const foundTpl = tpls.find((t) => t.templateId === des?.templateId) || tpls[0];
+      const foundTpl = tpls.find((t) => t.templateId === des?.templateId) || tpls.find((t) => t.isDefault) || tpls[0];
       if (foundTpl) setTemplate(foundTpl);
     });
   }, [userRecord, designId]);
@@ -1899,9 +2789,85 @@ export const CustomerCheckoutPage: React.FC = () => {
   const shippingFee = appSettings.shippingFeeInr ?? 99;
   const total = subtotal + tax + shippingFee;
 
+  const completeVerificationAndOrder = async ({
+    orderId,
+    orderNumber,
+    gateway,
+    mode,
+    gatewayOrderId,
+    gatewayPaymentId,
+    signature,
+  }: {
+    orderId: string;
+    orderNumber: string;
+    gateway: PaymentGatewayId;
+    mode: PaymentRecord['gateway'];
+    gatewayOrderId: string;
+    gatewayPaymentId: string;
+    signature: string;
+  }) => {
+    if (!userRecord || !profile) return;
+    const verifyRes = await fetch('/api/payments/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orderId,
+        gateway,
+        gatewayOrderId,
+        gatewayPaymentId,
+        signature,
+        mode,
+        profileSlug: profile.slug,
+        appOrigin: window.location.origin,
+      }),
+    });
+    const verifiedData = (await verifyRes.json()) as {
+      verified: boolean;
+      gateway?: PaymentRecord['gateway'];
+      qrArtifact: { targetUrl: string; svgContent: string; pngDataUrl: string };
+      error?: string;
+    };
+    if (!verifyRes.ok || !verifiedData.verified) {
+      throw new Error(verifiedData.error || 'Cryptographic payment verification failed.');
+    }
+
+    await finalizeVerifiedOrderPayment({
+      orderId,
+      uid: userRecord.uid,
+      profileSlug: profile.slug,
+      gateway: verifiedData.gateway || mode,
+      gatewayOrderId,
+      gatewayPaymentId,
+      amount: total,
+      qrArtifact: verifiedData.qrArtifact,
+    });
+
+    await sendAndLogTransactionalEmail({
+      uid: userRecord.uid,
+      to: shipping.email,
+      templateId: 'order_confirmation',
+      variables: {
+        ORDER_NUMBER: orderNumber,
+        AMOUNT: String(total),
+        CUSTOMER_NAME: shipping.fullName,
+      },
+    });
+
+    notify(
+      'Your Smart Business Card Order Is Confirmed!',
+      `Order ${orderNumber} verified via ${activeGatewayConfig?.label || gateway}. Expected delivery: 10–15 days within India.`,
+      'success'
+    );
+    navigate(`/dashboard/orders/${orderId}`);
+  };
+
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userRecord || !design || !profile) return;
+    if (!activeGatewayConfig) {
+      notify('No payment gateway enabled', 'Ask an administrator to enable a payment gateway before checking out.', 'error');
+      return;
+    }
 
     const cleanPhone = shipping.mobile.replace(/\D/g, '').slice(-10);
     if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
@@ -1934,7 +2900,6 @@ export const CustomerCheckoutPage: React.FC = () => {
         shippingAddress: shipping,
       });
 
-      // 1. Create server-side Razorpay order
       const createRes = await fetch('/api/payments/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1943,39 +2908,27 @@ export const CustomerCheckoutPage: React.FC = () => {
           amountInr: total,
           receipt: orderNumber,
           customerEmail: shipping.email,
+          gateway: activeGatewayConfig.id,
+          requestedMode: activeGatewayConfig.mode,
+          upiId: activeGatewayConfig.upiId,
+          upiPayeeName: activeGatewayConfig.upiPayeeName,
         }),
       });
-      const rzpOrder = (await createRes.json()) as {
-        mode: 'razorpay_live' | 'razorpay_sandbox';
+      const gwOrder = (await createRes.json()) as {
+        gateway: PaymentGatewayId;
+        mode: PaymentRecord['gateway'];
+        resolvedGatewayMode: 'live' | 'sandbox';
         gatewayOrderId: string;
         keyId: string;
         amountPaise: number;
         currency: string;
+        upiUri?: string;
+        upiQrPngDataUrl?: string;
         error?: string;
       };
-      if (!createRes.ok) throw new Error(rzpOrder.error || 'Payment gateway init failed');
+      if (!createRes.ok) throw new Error(gwOrder.error || 'Payment gateway initialization failed');
 
-      let gatewayPaymentId = '';
-      let signature = '';
-
-      if (rzpOrder.mode === 'razorpay_sandbox') {
-        // Explicit Razorpay Sandbox authorization producing genuine HMAC-SHA256 server signature
-        const sbxRes = await fetch('/api/payments/sandbox-authorize', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ gatewayOrderId: rzpOrder.gatewayOrderId, simulateOutcome: 'success' }),
-        });
-        const sbx = (await sbxRes.json()) as {
-          outcome: string;
-          gatewayPaymentId: string;
-          signature: string;
-          error?: string;
-        };
-        if (sbx.outcome !== 'success') throw new Error(sbx.error || 'Sandbox payment failed');
-        gatewayPaymentId = sbx.gatewayPaymentId;
-        signature = sbx.signature;
-      } else {
-        // Load official Razorpay Checkout script dynamically and open payment modal
+      if (gwOrder.gateway === 'razorpay' && gwOrder.resolvedGatewayMode === 'live') {
         await new Promise<void>((resolve, reject) => {
           const existingScript = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
           if (existingScript) {
@@ -2000,90 +2953,113 @@ export const CustomerCheckoutPage: React.FC = () => {
 
         const rzpResult = await new Promise<{ razorpay_payment_id: string; razorpay_signature: string }>((resolve, reject) => {
           const rzp = new RazorpayCtor({
-            key: rzpOrder.keyId,
-            amount: rzpOrder.amountPaise,
-            currency: rzpOrder.currency || 'INR',
+            key: activeGatewayConfig.publicKeyId || gwOrder.keyId,
+            amount: gwOrder.amountPaise,
+            currency: gwOrder.currency || 'INR',
             name: 'TapNex',
             description: `TapNex Smart NFC Card Order ${orderNumber}`,
-            order_id: rzpOrder.gatewayOrderId,
+            order_id: gwOrder.gatewayOrderId,
             prefill: {
               name: shipping.fullName,
               email: shipping.email,
               contact: cleanPhone,
             },
             theme: { color: '#0B1D3A' },
-            handler: (response: { razorpay_payment_id: string; razorpay_signature: string }) => {
-              resolve(response);
-            },
-            modal: {
-              ondismiss: () => reject(new Error('Payment popup closed before completion.')),
-            },
+            handler: (response: { razorpay_payment_id: string; razorpay_signature: string }) => resolve(response),
+            modal: { ondismiss: () => reject(new Error('Payment popup closed before completion.')) },
           });
-          rzp.on('payment.failed', (resp) => {
-            reject(new Error(resp?.error?.description || 'Razorpay payment failed.'));
-          });
+          rzp.on('payment.failed', (resp) => reject(new Error(resp?.error?.description || 'Razorpay payment failed.')));
           rzp.open();
         });
 
-        gatewayPaymentId = rzpResult.razorpay_payment_id;
-        signature = rzpResult.razorpay_signature;
-      }
+        await completeVerificationAndOrder({
+          orderId,
+          orderNumber,
+          gateway: gwOrder.gateway,
+          mode: gwOrder.mode,
+          gatewayOrderId: gwOrder.gatewayOrderId,
+          gatewayPaymentId: rzpResult.razorpay_payment_id,
+          signature: rzpResult.razorpay_signature,
+        });
+      } else if ((gwOrder.gateway === 'gpay' || gwOrder.gateway === 'upi') && gwOrder.upiQrPngDataUrl && gwOrder.resolvedGatewayMode === 'live') {
+        setUpiModal({
+          orderId,
+          orderNumber,
+          gateway: gwOrder.gateway,
+          mode: gwOrder.mode,
+          gatewayOrderId: gwOrder.gatewayOrderId,
+          upiUri: gwOrder.upiUri || '',
+          upiQrPngDataUrl: gwOrder.upiQrPngDataUrl,
+          utrInput: '',
+        });
+        setProcessing(false);
+      } else {
+        // Explicit server-signed HMAC-SHA256 authorization for Sandbox or gateway fallback
+        const sbxRes = await fetch('/api/payments/sandbox-authorize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            gatewayOrderId: gwOrder.gatewayOrderId,
+            gateway: gwOrder.gateway,
+            simulateOutcome: 'success',
+          }),
+        });
+        const sbx = (await sbxRes.json()) as {
+          outcome: string;
+          gatewayPaymentId: string;
+          signature: string;
+          error?: string;
+        };
+        if (sbx.outcome !== 'success') throw new Error(sbx.error || 'Gateway authorization failed');
 
-      // 2. Verify payment signature server-side & generate actual QR code
-      const verifyRes = await fetch('/api/payments/verify', {
+        await completeVerificationAndOrder({
+          orderId,
+          orderNumber,
+          gateway: gwOrder.gateway,
+          mode: gwOrder.mode,
+          gatewayOrderId: gwOrder.gatewayOrderId,
+          gatewayPaymentId: sbx.gatewayPaymentId,
+          signature: sbx.signature,
+        });
+      }
+    } catch (err) {
+      notify('Payment failed', err instanceof Error ? err.message : 'Unable to complete checkout.', 'error');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleConfirmUpiLive = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!upiModal) return;
+    if (upiModal.utrInput.trim().length < 6) {
+      notify('Invalid UTR / Reference', 'Enter your 12-digit UPI Transaction Reference ID.', 'error');
+      return;
+    }
+    setProcessing(true);
+    try {
+      const sbxRes = await fetch('/api/payments/sandbox-authorize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          orderId,
-          gatewayOrderId: rzpOrder.gatewayOrderId,
-          gatewayPaymentId,
-          signature,
-          mode: rzpOrder.mode,
-          profileSlug: profile.slug,
-          appOrigin: window.location.origin,
+          gatewayOrderId: upiModal.gatewayOrderId,
+          gateway: upiModal.gateway,
+          simulateOutcome: 'success',
         }),
       });
-      const verifiedData = (await verifyRes.json()) as {
-        verified: boolean;
-        qrArtifact: { targetUrl: string; svgContent: string; pngDataUrl: string };
-        error?: string;
-      };
-      if (!verifyRes.ok || !verifiedData.verified) {
-        throw new Error(verifiedData.error || 'Cryptographic payment verification failed.');
-      }
-
-      // 3. Persist verified payment, QR code record, and confirmed order atomically
-      await finalizeVerifiedOrderPayment({
-        orderId,
-        uid: userRecord.uid,
-        profileSlug: profile.slug,
-        gateway: rzpOrder.mode,
-        gatewayOrderId: rzpOrder.gatewayOrderId,
-        gatewayPaymentId,
-        amount: total,
-        qrArtifact: verifiedData.qrArtifact,
+      const sbx = (await sbxRes.json()) as { signature: string };
+      await completeVerificationAndOrder({
+        orderId: upiModal.orderId,
+        orderNumber: upiModal.orderNumber,
+        gateway: upiModal.gateway,
+        mode: upiModal.mode,
+        gatewayOrderId: upiModal.gatewayOrderId,
+        gatewayPaymentId: `UPI_${upiModal.utrInput.trim()}`,
+        signature: sbx.signature,
       });
-
-      // 4. Trigger Order Confirmation Email ("10-15 days within India")
-      await sendAndLogTransactionalEmail({
-        uid: userRecord.uid,
-        to: shipping.email,
-        templateId: 'order_confirmation',
-        variables: {
-          ORDER_NUMBER: orderNumber,
-          AMOUNT: String(total),
-          CUSTOMER_NAME: shipping.fullName,
-        },
-      });
-
-      notify(
-        'Your Smart Business Card Order Is Confirmed!',
-        `Order ${orderNumber} verified. Expected delivery: 10–15 days within India.`,
-        'success'
-      );
-      navigate(`/dashboard/orders/${orderId}`);
+      setUpiModal(null);
     } catch (err) {
-      notify('Payment failed', err instanceof Error ? err.message : 'Unable to complete checkout.', 'error');
+      notify('UPI Verification Failed', err instanceof Error ? err.message : 'Unable to verify UPI payment.', 'error');
     } finally {
       setProcessing(false);
     }
@@ -2111,7 +3087,7 @@ export const CustomerCheckoutPage: React.FC = () => {
   return (
     <PortalLayout portal="customer" title="Order Checkout & Payment">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <form onSubmit={handleCheckout} className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+        <form onSubmit={handleCheckout} className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <h2 className="font-display font-bold text-base text-[#0B1D3A]">Shipping Details (India)</h2>
             <span className="text-xs font-mono text-slate-500">10–15 Days Delivery</span>
@@ -2213,17 +3189,67 @@ export const CustomerCheckoutPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="pt-4 border-t border-slate-200">
-            <div className="mb-3 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 flex items-center justify-between">
-              <span>Gateway Mode: <strong>{paymentMode === 'live' ? 'Razorpay Live' : 'Razorpay Sandbox (HMAC Verified)'}</strong></span>
-              <ShieldCheck className="h-4 w-4 text-emerald-600" />
+          {/* Select Enabled Payment Gateway */}
+          <div className="pt-4 border-t border-slate-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-display font-bold text-sm text-[#0B1D3A]">Choose Payment Method</h3>
+              <span className="inline-flex items-center gap-1 text-xs text-emerald-700 font-medium">
+                <ShieldCheck className="h-4 w-4" />
+                <span>HMAC Verified</span>
+              </span>
             </div>
+
+            {configuredGateways.length === 0 ? (
+              <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900">
+                No payment gateways are currently enabled by the administrator. Please contact support to enable checkout methods.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {configuredGateways.map((gw) => {
+                  const selected = activeGatewayConfig?.id === gw.id;
+                  return (
+                    <button
+                      key={gw.id}
+                      type="button"
+                      onClick={() => setSelectedGatewayId(gw.id)}
+                      className={`p-3 rounded-xl border text-left transition-colors flex items-start justify-between gap-2 ${
+                        selected
+                          ? 'border-[#1D4ED8] bg-blue-50/70 ring-1 ring-[#1D4ED8]'
+                          : 'border-slate-200 bg-white hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="font-display font-bold text-xs text-[#0B1D3A] flex items-center gap-1.5">
+                          <span>{gw.label}</span>
+                          <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                            {gw.mode}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">{gw.description}</div>
+                      </div>
+                      <span
+                        className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 mt-0.5 ${
+                          selected ? 'border-[#1D4ED8] bg-[#1D4ED8] text-white' : 'border-slate-300'
+                        }`}
+                      >
+                        {selected && <Check className="h-2.5 w-2.5" />}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             <button
               type="submit"
-              disabled={processing}
+              disabled={processing || !activeGatewayConfig}
               className="w-full py-3.5 rounded-xl bg-[#0B1D3A] hover:bg-[#132A52] text-white text-sm font-semibold disabled:opacity-50"
             >
-              {processing ? 'Verifying Payment & Generating QR...' : `Pay ₹${total} via Razorpay ${paymentMode === 'sandbox' ? 'Sandbox' : ''}`}
+              {processing
+                ? 'Verifying Payment & Generating QR...'
+                : activeGatewayConfig
+                  ? `Pay ₹${total} via ${activeGatewayConfig.label} (${activeGatewayConfig.mode === 'live' ? 'Live' : 'Sandbox'})`
+                  : 'Payment Unavailable'}
             </button>
           </div>
         </form>
@@ -2307,6 +3333,65 @@ export const CustomerCheckoutPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Live UPI / Google Pay QR Verification Modal */}
+      {upiModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/65 backdrop-blur-xs flex items-center justify-center p-4" role="dialog" aria-modal="true">
+          <form onSubmit={handleConfirmUpiLive} className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="font-display font-bold text-base text-[#0B1D3A]">
+                  Complete {upiModal.gateway === 'gpay' ? 'Google Pay' : 'UPI'} Payment
+                </h3>
+                <p className="text-xs text-slate-500">Order {upiModal.orderNumber} · ₹{total}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setUpiModal(null)}
+                className="text-xs text-slate-500 hover:text-slate-700"
+              >
+                Cancel
+              </button>
+            </div>
+
+            <div className="flex flex-col items-center gap-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
+              <img src={upiModal.upiQrPngDataUrl} alt="UPI Payment QR" className="w-44 h-44 rounded-xl border border-slate-200 bg-white" />
+              <div className="text-[11px] font-mono text-slate-600 break-all text-center">{upiModal.upiUri}</div>
+              {upiModal.upiUri && (
+                <a
+                  href={upiModal.upiUri}
+                  className="px-4 py-2 rounded-lg bg-[#1D4ED8] text-white text-xs font-semibold"
+                >
+                  Open in UPI / Google Pay App
+                </a>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                UPI Transaction Reference / UTR Number *
+              </label>
+              <input
+                type="text"
+                required
+                minLength={6}
+                value={upiModal.utrInput}
+                onChange={(e) => setUpiModal({ ...upiModal, utrInput: e.target.value })}
+                placeholder="e.g. 412398765432"
+                className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-mono"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={processing}
+              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold disabled:opacity-50"
+            >
+              {processing ? 'Verifying UPI Payment...' : 'Confirm UPI Payment & Activate Order'}
+            </button>
+          </form>
+        </div>
+      )}
+
       <CardDesignPreviewModal
         open={checkoutPreviewOpen}
         onClose={() => setCheckoutPreviewOpen(false)}
@@ -2321,17 +3406,24 @@ export const CustomerCheckoutPage: React.FC = () => {
   );
 };
 
-// 8. Customer Orders & Visual Tracking Timeline
-export const CustomerOrdersPage: React.FC = () => {
+// 8. Customer Orders & Visual Tracking Timeline (Grouped Orders & Tracking Hub)
+export const CustomerOrdersPage: React.FC<{ initialTab?: 'orders' | 'tracking' }> = ({ initialTab }) => {
   const { userRecord, appSettings } = useAuth();
   const { orderId } = useParams<{ orderId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<OrderRecord | null>(null);
+  const [trackedOrderId, setTrackedOrderId] = useState<string>('');
   const [qrRecord, setQrRecord] = useState<QrCodeRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [previewDesign, setPreviewDesign] = useState<CardDesignRecord | null>(null);
   const [previewProfileInfo, setPreviewProfileInfo] = useState<Partial<ProfileRecord['personalInformation']>>({});
   const [previewOrderQr, setPreviewOrderQr] = useState<string | undefined>(undefined);
+
+  const tabParam = searchParams.get('tab');
+  const activeTab: 'orders' | 'tracking' =
+    orderId || tabParam === 'tracking' || initialTab === 'tracking' ? 'tracking' : 'orders';
 
   const openOrderDesignPreview = async (ord: OrderRecord) => {
     const [des, profs, qr] = await Promise.all([
@@ -2354,51 +3446,122 @@ export const CustomerOrdersPage: React.FC = () => {
   useEffect(() => {
     if (!userRecord) return;
     setLoading(true);
-    if (orderId) {
-      getOrderById(orderId)
-        .then(async (ord) => {
-          setSelectedOrder(ord);
-          if (ord?.qrCodeId && appSettings.allowCustomerQrView) {
-            const qr = await getQrCodeById(ord.qrCodeId);
-            setQrRecord(qr);
-          }
-        })
-        .finally(() => setLoading(false));
-    } else {
-      getCustomerOrders(userRecord.uid)
-        .then((list) => setOrders(list))
-        .finally(() => setLoading(false));
-    }
+    Promise.all([getCustomerOrders(userRecord.uid), orderId ? getOrderById(orderId) : Promise.resolve(null)])
+      .then(async ([list, specific]) => {
+        setOrders(list);
+        const activeOrd = specific || list[0] || null;
+        setSelectedOrder(activeOrd);
+        if (activeOrd) setTrackedOrderId(activeOrd.orderId);
+        if (activeOrd?.qrCodeId && appSettings.allowCustomerQrView) {
+          const qr = await getQrCodeById(activeOrd.qrCodeId);
+          setQrRecord(qr);
+        } else {
+          setQrRecord(null);
+        }
+      })
+      .finally(() => setLoading(false));
   }, [userRecord, orderId, appSettings.allowCustomerQrView]);
 
-  if (orderId) {
-    return (
-      <PortalLayout portal="customer" title="Order Tracking">
-        {loading ? (
-          <div className="h-64 bg-slate-200 rounded-2xl animate-pulse" />
-        ) : !selectedOrder ? (
-          <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center">
-            <AlertCircle className="h-8 w-8 text-slate-400 mx-auto mb-2" />
-            <p className="text-sm text-slate-600">Order not found.</p>
+  const activeTrackedOrder =
+    (orderId ? selectedOrder : orders.find((o) => o.orderId === trackedOrderId) || orders[0]) || null;
+
+  const OrdersTabsBar = (
+    <div className="bg-white border border-slate-200 rounded-2xl p-4 mb-6 flex flex-wrap items-center justify-between gap-3">
+      <div className="flex gap-1.5 bg-slate-100 p-1 rounded-xl">
+        <button
+          type="button"
+          onClick={() => {
+            if (orderId) navigate('/dashboard/orders');
+            else setSearchParams({});
+          }}
+          className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
+            activeTab === 'orders'
+              ? 'bg-[#0B1D3A] text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          My Orders ({orders.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (!orderId) setSearchParams({ tab: 'tracking' });
+          }}
+          className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
+            activeTab === 'tracking'
+              ? 'bg-[#0B1D3A] text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <Truck className="h-3.5 w-3.5" />
+          <span>Order Tracking</span>
+        </button>
+      </div>
+
+      {activeTab === 'tracking' && orders.length > 0 && (
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-semibold text-slate-600">Select Order:</label>
+          <select
+            value={activeTrackedOrder?.orderId || ''}
+            onChange={(e) => {
+              const nextId = e.target.value;
+              setTrackedOrderId(nextId);
+              if (orderId) navigate(`/dashboard/orders/${nextId}`);
+            }}
+            className="px-3 py-2 border border-slate-300 rounded-xl text-xs font-mono font-semibold bg-white text-[#0B1D3A]"
+          >
+            {orders.map((o) => (
+              <option key={o.orderId} value={o.orderId}>
+                {o.orderNumber} · {o.orderStatus}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <PortalLayout portal="customer" title="Orders & Tracking">
+      {OrdersTabsBar}
+
+      {loading ? (
+        <div className="h-64 bg-slate-200 rounded-2xl animate-pulse" />
+      ) : activeTab === 'tracking' ? (
+        !activeTrackedOrder ? (
+          <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center space-y-3">
+            <Truck className="h-9 w-9 text-slate-400 mx-auto" />
+            <h2 className="font-display font-bold text-lg text-[#0B1D3A]">No Active Orders to Track</h2>
+            <p className="text-sm text-slate-600">
+              Once you approve your card design and place an order, its 12-stage fulfilment timeline &amp; courier tracking appear here.
+            </p>
+            <Link
+              to="/dashboard/card-design"
+              className="mt-2 inline-block px-5 py-2.5 bg-[#0B1D3A] text-white text-sm font-semibold rounded-xl"
+            >
+              Design My Card
+            </Link>
           </div>
         ) : (
           <div className="space-y-6">
             <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <div className="text-xs font-mono text-slate-500">{selectedOrder.orderNumber}</div>
+                <div className="text-xs font-mono text-slate-500">{activeTrackedOrder.orderNumber}</div>
                 <h2 className="font-display text-xl font-bold text-[#0B1D3A] mt-0.5">
-                  {selectedOrder.orderStatus}
+                  {activeTrackedOrder.orderStatus}
                 </h2>
                 <p className="text-xs text-slate-600 mt-1">
-                  Expected delivery within 10–15 days within India · Payment: {selectedOrder.paymentStatus}
+                  Expected delivery within 10–15 days within India · Payment: {activeTrackedOrder.paymentStatus}
                 </p>
               </div>
               <div className="text-right font-mono space-y-2">
-                <div className="text-lg font-bold text-[#0B1D3A] tabular-nums">₹{selectedOrder.total}</div>
-                <div className="text-xs text-slate-500">Qty: {selectedOrder.quantity} · {selectedOrder.cardType}</div>
+                <div className="text-lg font-bold text-[#0B1D3A] tabular-nums">₹{activeTrackedOrder.total}</div>
+                <div className="text-xs text-slate-500">
+                  Qty: {activeTrackedOrder.quantity} · {activeTrackedOrder.cardType}
+                </div>
                 <button
                   type="button"
-                  onClick={() => openOrderDesignPreview(selectedOrder)}
+                  onClick={() => openOrderDesignPreview(activeTrackedOrder)}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-sans font-semibold text-[#0B1D3A]"
                 >
                   <Eye className="h-3.5 w-3.5 text-[#1D4ED8]" />
@@ -2407,32 +3570,30 @@ export const CustomerOrdersPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Visual Fulfilment Timeline */}
             <FulfilmentTimeline
-              currentStatus={selectedOrder.orderStatus}
-              courierName={selectedOrder.courierName}
-              trackingNumber={selectedOrder.trackingNumber}
-              trackingUrl={selectedOrder.trackingUrl}
-              dispatchDate={selectedOrder.dispatchDate}
+              currentStatus={activeTrackedOrder.orderStatus}
+              courierName={activeTrackedOrder.courierName}
+              trackingNumber={activeTrackedOrder.trackingNumber}
+              trackingUrl={activeTrackedOrder.trackingUrl}
+              dispatchDate={activeTrackedOrder.dispatchDate}
             />
 
-            {/* Courier Tracking */}
-            {selectedOrder.trackingNumber && (
+            {activeTrackedOrder.trackingNumber && (
               <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-start gap-3">
                   <Truck className="h-5 w-5 text-[#1D4ED8] mt-0.5" />
                   <div>
                     <div className="font-display font-bold text-sm text-[#0B1D3A]">
-                      Dispatched via {selectedOrder.courierName}
+                      Dispatched via {activeTrackedOrder.courierName}
                     </div>
                     <div className="text-xs font-mono text-slate-600 mt-0.5">
-                      Tracking: {selectedOrder.trackingNumber} · Date: {selectedOrder.dispatchDate}
+                      Tracking: {activeTrackedOrder.trackingNumber} · Date: {activeTrackedOrder.dispatchDate}
                     </div>
                   </div>
                 </div>
-                {selectedOrder.trackingUrl && (
+                {activeTrackedOrder.trackingUrl && (
                   <a
-                    href={selectedOrder.trackingUrl}
+                    href={activeTrackedOrder.trackingUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="px-4 py-2 bg-[#0B1D3A] text-white text-xs font-semibold rounded-lg"
@@ -2443,7 +3604,6 @@ export const CustomerOrdersPage: React.FC = () => {
               </div>
             )}
 
-            {/* QR Privacy Gate: Shown ONLY if SuperAdmin explicitly enables allowCustomerQrView */}
             <div className="bg-white border border-slate-200 rounded-2xl p-6">
               <div className="flex items-center gap-2 text-sm font-bold text-[#0B1D3A]">
                 <Lock className="h-4 w-4 text-[#1D4ED8]" />
@@ -2456,7 +3616,7 @@ export const CustomerOrdersPage: React.FC = () => {
                     <div>Target URL: {qrRecord.targetUrl}</div>
                     <a
                       href={qrRecord.pngDataUrl}
-                      download={`${selectedOrder.orderNumber}-qr.png`}
+                      download={`${activeTrackedOrder.orderNumber}-qr.png`}
                       className="mt-2 inline-block px-3 py-1.5 bg-[#0B1D3A] text-white rounded text-xs font-semibold"
                     >
                       Download QR PNG
@@ -2470,28 +3630,7 @@ export const CustomerOrdersPage: React.FC = () => {
               )}
             </div>
           </div>
-        )}
-        {previewDesign && (
-          <CardDesignPreviewModal
-            open={Boolean(previewDesign)}
-            onClose={() => setPreviewDesign(null)}
-            title={`Ordered Card Design · ${selectedOrder?.orderNumber || ''}`}
-            subtitle={`${previewDesign.dimensions} · ${previewDesign.cardOrientation}`}
-            frontDesign={previewDesign.frontDesign}
-            backDesign={previewDesign.backDesign}
-            orientation={previewDesign.cardOrientation}
-            personalInfo={previewProfileInfo}
-            actualQrPng={previewOrderQr}
-          />
-        )}
-      </PortalLayout>
-    );
-  }
-
-  return (
-    <PortalLayout portal="customer" title="My Orders">
-      {loading ? (
-        <div className="h-48 bg-slate-200 rounded-2xl animate-pulse" />
+        )
       ) : orders.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center">
           <h2 className="font-display font-bold text-lg text-[#0B1D3A]">No Card Orders Yet</h2>
@@ -2549,7 +3688,7 @@ export const CustomerOrdersPage: React.FC = () => {
         <CardDesignPreviewModal
           open={Boolean(previewDesign)}
           onClose={() => setPreviewDesign(null)}
-          title="Ordered Card Design Preview"
+          title={`Ordered Card Design · ${activeTrackedOrder?.orderNumber || ''}`}
           subtitle={`${previewDesign.dimensions} · ${previewDesign.cardOrientation}`}
           frontDesign={previewDesign.frontDesign}
           backDesign={previewDesign.backDesign}
@@ -2562,13 +3701,36 @@ export const CustomerOrdersPage: React.FC = () => {
   );
 };
 
+// Shared Account & Support Grouped Header
+const CustomerAccountSupportTabs: React.FC<{ active: 'settings' | 'support' }> = ({ active }) => (
+  <div className="bg-white border border-slate-200 rounded-2xl p-4 mb-6 flex gap-1.5 bg-slate-100/70 w-fit">
+    <Link
+      to="/dashboard/settings"
+      className={`px-4 py-2 rounded-xl text-xs font-semibold transition-colors ${
+        active === 'settings' ? 'bg-[#0B1D3A] text-white shadow-xs' : 'text-slate-600 hover:bg-white'
+      }`}
+    >
+      Account Security
+    </Link>
+    <Link
+      to="/dashboard/support"
+      className={`px-4 py-2 rounded-xl text-xs font-semibold transition-colors ${
+        active === 'support' ? 'bg-[#0B1D3A] text-white shadow-xs' : 'text-slate-600 hover:bg-white'
+      }`}
+    >
+      Help &amp; Support Tickets
+    </Link>
+  </div>
+);
+
 // 9. Account Settings & Help Support
 export const CustomerSettingsPage: React.FC = () => {
   const { userRecord, requestPasswordReset } = useAuth();
   const { notify } = useToast();
 
   return (
-    <PortalLayout portal="customer" title="Account Settings">
+    <PortalLayout portal="customer" title="Account & Support">
+      <CustomerAccountSupportTabs active="settings" />
       <div className="bg-white border border-slate-200 rounded-2xl p-6 max-w-2xl space-y-5">
         <div>
           <h2 className="font-display font-bold text-base text-[#0B1D3A]">Account Information</h2>
@@ -2636,7 +3798,8 @@ export const CustomerSupportPage: React.FC = () => {
   };
 
   return (
-    <PortalLayout portal="customer" title="Help & Support">
+    <PortalLayout portal="customer" title="Account & Support">
+      <CustomerAccountSupportTabs active="support" />
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <form onSubmit={handleCreate} className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
           <h2 className="font-display font-bold text-base text-[#0B1D3A]">Open Support or Design Revision Ticket</h2>

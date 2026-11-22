@@ -110,13 +110,16 @@ service cloud.firestore {
 
     function isValidProfile(data) {
       return data.keys().hasAll(['profileId', 'uid', 'slug', 'personalInformation', 'visibilitySettings', 'isPublic', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['profileId', 'uid', 'profileLabel', 'slug', 'personalInformation', 'socialLinks', 'customFields', 'visibilitySettings', 'selectedTemplate', 'isPublic', 'viewsCount', 'qrScansCount', 'nfcVisitsCount', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['profileId', 'uid', 'profileLabel', 'slug', 'personalInformation', 'socialLinks', 'customFields', 'visibilitySettings', 'selectedTemplate', 'isPublic', 'adminApproved', 'adminApprovedAt', 'adminApprovedBy', 'viewsCount', 'qrScansCount', 'nfcVisitsCount', 'createdAt', 'updatedAt']) &&
         isValidId(data.profileId) &&
         isValidId(data.uid) &&
         data.slug is string && data.slug.size() >= 3 && data.slug.size() <= 64 && data.slug.matches('^[a-z0-9\\-]+$') &&
         data.personalInformation is map &&
         data.visibilitySettings is map &&
         data.isPublic is bool &&
+        (!('adminApproved' in data) || data.adminApproved is bool) &&
+        (!('adminApprovedAt' in data) || (data.adminApprovedAt is string && data.adminApprovedAt.size() <= 64)) &&
+        (!('adminApprovedBy' in data) || (data.adminApprovedBy is string && data.adminApprovedBy.size() <= 128)) &&
         (!('profileLabel' in data) || (data.profileLabel is string && data.profileLabel.size() <= 80)) &&
         (!('selectedTemplate' in data) || (data.selectedTemplate is string && data.selectedTemplate.size() <= 80)) &&
         (!('socialLinks' in data) || (data.socialLinks is list && data.socialLinks.size() <= 30)) &&
@@ -128,7 +131,7 @@ service cloud.firestore {
 
     function isValidPublicProfile(data) {
       return data.keys().hasAll(['slug', 'profileId', 'uid', 'isPublic', 'updatedAt']) &&
-        data.keys().hasOnly(['slug', 'profileId', 'uid', 'isPublic', 'unavailableMessage', 'personalInformation', 'socialLinks', 'customFields', 'themeColor', 'paymentConfirmed', 'lastPaidOrderId', 'updatedAt']) &&
+        data.keys().hasOnly(['slug', 'profileId', 'uid', 'isPublic', 'unavailableMessage', 'personalInformation', 'socialLinks', 'customFields', 'themeColor', 'paymentConfirmed', 'adminApproved', 'adminApprovedAt', 'adminApprovedBy', 'lastPaidOrderId', 'updatedAt']) &&
         data.slug is string && data.slug.size() >= 3 && data.slug.size() <= 64 && data.slug.matches('^[a-z0-9\\-]+$') &&
         isValidId(data.profileId) &&
         isValidId(data.uid) &&
@@ -139,6 +142,9 @@ service cloud.firestore {
         (!('customFields' in data) || (data.customFields is list && data.customFields.size() <= 30)) &&
         (!('themeColor' in data) || (data.themeColor is string && data.themeColor.size() <= 32)) &&
         (!('paymentConfirmed' in data) || data.paymentConfirmed is bool) &&
+        (!('adminApproved' in data) || data.adminApproved is bool) &&
+        (!('adminApprovedAt' in data) || (data.adminApprovedAt is string && data.adminApprovedAt.size() <= 64)) &&
+        (!('adminApprovedBy' in data) || (data.adminApprovedBy is string && data.adminApprovedBy.size() <= 128)) &&
         (!('lastPaidOrderId' in data) || (data.lastPaidOrderId is string && data.lastPaidOrderId.size() <= 128));
     }
 
@@ -202,7 +208,14 @@ service cloud.firestore {
         isValidId(data.paymentId) &&
         isValidId(data.orderId) &&
         isValidId(data.uid) &&
-        data.gateway in ['razorpay_live', 'razorpay_sandbox'] &&
+        data.gateway in [
+          'razorpay_live', 'razorpay_sandbox',
+          'cashfree_live', 'cashfree_sandbox',
+          'easebuzz_live', 'easebuzz_sandbox',
+          'payu_live', 'payu_sandbox',
+          'gpay_live', 'gpay_sandbox',
+          'upi_live', 'upi_sandbox'
+        ] &&
         data.gatewayOrderId is string && data.gatewayOrderId.size() <= 128 &&
         data.signatureVerified is bool &&
         data.amount is number && data.amount >= 0 &&
@@ -267,6 +280,21 @@ service cloud.firestore {
         data.targetId is string && data.targetId.size() <= 128;
     }
 
+    function isValidAppSettings(data) {
+      return data.keys().hasAll(['settingId', 'companyName', 'multipleProfilesEnabled', 'allowCustomerQrView', 'baseCardPriceInr', 'taxRatePercent', 'shippingFeeInr', 'updatedAt']) &&
+        data.keys().hasOnly(['settingId', 'companyName', 'supportEmail', 'multipleProfilesEnabled', 'allowCustomerQrView', 'baseCardPriceInr', 'taxRatePercent', 'shippingFeeInr', 'inactiveProfileMessage', 'paymentGateways', 'updatedAt']) &&
+        isValidId(data.settingId) &&
+        data.companyName is string && data.companyName.size() <= 120 &&
+        (!('supportEmail' in data) || (data.supportEmail is string && data.supportEmail.size() <= 254)) &&
+        data.multipleProfilesEnabled is bool &&
+        data.allowCustomerQrView is bool &&
+        data.baseCardPriceInr is number && data.baseCardPriceInr >= 0 &&
+        data.taxRatePercent is number && data.taxRatePercent >= 0 &&
+        data.shippingFeeInr is number && data.shippingFeeInr >= 0 &&
+        (!('inactiveProfileMessage' in data) || (data.inactiveProfileMessage is string && data.inactiveProfileMessage.size() <= 300)) &&
+        (!('paymentGateways' in data) || data.paymentGateways is map);
+    }
+
     // --- Collection Rules ---
 
     // 1. Users
@@ -278,6 +306,7 @@ service cloud.firestore {
         incoming().updatedAt == request.time && (
           (isOwner(uid) && incoming().uid == request.auth.uid && incoming().role == 'USER' && incoming().status in ['Pending Verification', 'Active']) ||
           (isOwner(uid) && isBootstrappedSuperAdmin() && incoming().role == 'SUPERADMIN' && incoming().status == 'Active') ||
+          (isOwner(uid) && isAdmin() && incoming().uid == request.auth.uid && incoming().role == get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role && incoming().status == 'Active') ||
           isSuperAdmin() ||
           (isAdmin() && incoming().role in ['USER', 'PRINTER'])
         );
@@ -329,6 +358,7 @@ service cloud.firestore {
       allow list: if (isSignedIn() && resource.data.uid == request.auth.uid) || isAdmin();
       allow create: if isValidId(profileId) && isActiveUser() && isValidProfile(incoming()) &&
         incoming().uid == request.auth.uid &&
+        incoming().get('adminApproved', false) == false &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
       allow update: if isValidId(profileId) && isValidProfile(incoming()) &&
@@ -338,6 +368,7 @@ service cloud.firestore {
         incoming().updatedAt == request.time && (
           isAdmin() ||
           (isActiveUser() && existing().uid == request.auth.uid &&
+            incoming().get('adminApproved', false) == existing().get('adminApproved', false) &&
             incoming().diff(existing()).affectedKeys().hasOnly(['profileLabel', 'slug', 'personalInformation', 'socialLinks', 'customFields', 'visibilitySettings', 'selectedTemplate', 'isPublic', 'updatedAt']))
         );
       allow delete: if isValidId(profileId) && (isAdmin() || (isActiveUser() && existing().uid == request.auth.uid));
@@ -352,6 +383,8 @@ service cloud.firestore {
           isAdmin() ||
           (isActiveUser() && incoming().uid == request.auth.uid &&
             (!exists(/databases/$(database)/documents/publicProfiles/$(slug)) || existing().uid == request.auth.uid) &&
+            (!('adminApproved' in incoming()) || incoming().adminApproved == false ||
+              (exists(/databases/$(database)/documents/publicProfiles/$(slug)) && existing().get('adminApproved', false) == true)) &&
             (!('paymentConfirmed' in incoming()) || incoming().paymentConfirmed == false ||
               (exists(/databases/$(database)/documents/publicProfiles/$(slug)) && existing().paymentConfirmed == true) ||
               ('lastPaidOrderId' in incoming() && incoming().lastPaidOrderId is string && isValidId(incoming().lastPaidOrderId) &&
@@ -511,7 +544,8 @@ service cloud.firestore {
     match /appSettings/{settingId} {
       allow get: if isValidId(settingId);
       allow list: if isAdmin();
-      allow create, update, delete: if isValidId(settingId) && isSuperAdmin();
+      allow create, update: if isValidId(settingId) && (isAdmin() || isSuperAdmin()) && isValidAppSettings(incoming());
+      allow delete: if isValidId(settingId) && isSuperAdmin();
     }
 
     // 16. Audit Logs (Append-only)

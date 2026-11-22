@@ -19,8 +19,10 @@ import {
   DEFAULT_APP_SETTINGS,
   DEFAULT_CARD_TEMPLATES,
   DEFAULT_EMAIL_TEMPLATES,
+  DEFAULT_PAYMENT_GATEWAYS,
   DEFAULT_VISIBILITY,
   EMPTY_PERSONAL_INFO,
+  PAYMENT_GATEWAY_ORDER,
 } from './constants';
 import { generateHighResQrArtwork } from './qrArtwork';
 import { clearAllLocalStudioDrafts } from './studioDraft';
@@ -34,6 +36,8 @@ import type {
   NotificationRecord,
   OrderRecord,
   OrderStatus,
+  PaymentGatewayConfig,
+  PaymentGatewayId,
   PaymentRecord,
   PaymentStatus,
   PersonalInformation,
@@ -220,6 +224,9 @@ export function buildSanitizedPublicProfile(
     socialLinks: publicSocials,
     customFields: publicCustomFields,
     themeColor: '#0B1D3A',
+    ...(profile.adminApproved ? { adminApproved: true } : {}),
+    ...(profile.adminApprovedAt ? { adminApprovedAt: profile.adminApprovedAt } : {}),
+    ...(profile.adminApprovedBy ? { adminApprovedBy: profile.adminApprovedBy } : {}),
   };
 }
 
@@ -251,16 +258,49 @@ export async function recordAuditLog(params: {
   }
 }
 
-// --- App Settings ---
+// --- App Settings & Multi-Gateway Config ---
+export function mergePaymentGateways(
+  raw?: Partial<Record<PaymentGatewayId, Partial<PaymentGatewayConfig>>> | null
+): Record<PaymentGatewayId, PaymentGatewayConfig> {
+  const merged = {} as Record<PaymentGatewayId, PaymentGatewayConfig>;
+  for (const id of PAYMENT_GATEWAY_ORDER) {
+    const def = DEFAULT_PAYMENT_GATEWAYS[id];
+    const incoming = raw?.[id] || {};
+    merged[id] = {
+      id,
+      label: typeof incoming.label === 'string' && incoming.label.trim() ? incoming.label.trim() : def.label,
+      enabled: typeof incoming.enabled === 'boolean' ? incoming.enabled : def.enabled,
+      mode: incoming.mode === 'live' ? 'live' : 'sandbox',
+      publicKeyId: typeof incoming.publicKeyId === 'string' ? incoming.publicKeyId : def.publicKeyId || '',
+      merchantId: typeof incoming.merchantId === 'string' ? incoming.merchantId : def.merchantId || '',
+      upiId: typeof incoming.upiId === 'string' ? incoming.upiId : def.upiId || '',
+      upiPayeeName: typeof incoming.upiPayeeName === 'string' ? incoming.upiPayeeName : def.upiPayeeName || '',
+      description: typeof incoming.description === 'string' ? incoming.description : def.description || '',
+    };
+  }
+  return merged;
+}
+
 export async function getAppSettings(): Promise<AppSettingsRecord> {
   try {
     const snap = await getDoc(doc(db, 'appSettings', 'global'));
     if (snap.exists()) {
-      return snap.data() as AppSettingsRecord;
+      const data = snap.data() as Partial<AppSettingsRecord>;
+      return {
+        ...DEFAULT_APP_SETTINGS,
+        ...data,
+        paymentGateways: mergePaymentGateways(data.paymentGateways),
+      };
     }
-    return DEFAULT_APP_SETTINGS;
+    return {
+      ...DEFAULT_APP_SETTINGS,
+      paymentGateways: mergePaymentGateways(DEFAULT_PAYMENT_GATEWAYS),
+    };
   } catch {
-    return DEFAULT_APP_SETTINGS;
+    return {
+      ...DEFAULT_APP_SETTINGS,
+      paymentGateways: mergePaymentGateways(DEFAULT_PAYMENT_GATEWAYS),
+    };
   }
 }
 
@@ -270,11 +310,18 @@ export async function saveAppSettings(
 ): Promise<void> {
   const path = 'appSettings/global';
   try {
+    const existing = await getAppSettings();
+    const nextPaymentGateways = settings.paymentGateways
+      ? mergePaymentGateways(settings.paymentGateways)
+      : existing.paymentGateways || mergePaymentGateways(DEFAULT_PAYMENT_GATEWAYS);
+
     await setDoc(
       doc(db, 'appSettings', 'global'),
       {
         ...DEFAULT_APP_SETTINGS,
+        ...existing,
         ...settings,
+        paymentGateways: nextPaymentGateways,
         settingId: 'global',
         updatedAt: serverTimestamp(),
       },
@@ -323,11 +370,14 @@ export async function ensureDefaultProfile(user: UserRecord): Promise<ProfileRec
   const existing = await getUserProfiles(user.uid);
   if (existing.length > 0) return existing[0];
 
+  const uidSuffix = user.uid.slice(0, 4).toLowerCase();
   const baseName = sanitizeSlug(user.displayName || user.username || user.email.split('@')[0] || 'member');
   let slug = baseName.length >= 3 ? baseName : `card-${user.uid.slice(0, 6).toLowerCase()}`;
-  const available = await isSlugAvailable(slug);
-  if (!available) {
-    slug = `${slug}-${user.uid.slice(0, 4).toLowerCase()}`;
+  if (!(await isSlugAvailable(slug))) {
+    slug = `${slug.slice(0, 54).replace(/-+$/, '')}-${uidSuffix}`;
+    if (!(await isSlugAvailable(slug))) {
+      slug = `${slug.slice(0, 46).replace(/-+$/, '')}-${Date.now().toString(36).slice(-6)}`;
+    }
   }
 
   const profileId = `prof_${user.uid}`;
@@ -438,18 +488,31 @@ export async function saveProfileAndSyncPublic(
 
   let existingPaymentConfirmed = false;
   let existingLastPaidOrderId = '';
+  let existingAdminApproved = Boolean(profile.adminApproved);
+  let existingAdminApprovedAt = profile.adminApprovedAt || '';
+  let existingAdminApprovedBy = profile.adminApprovedBy || '';
   try {
     const existingPub = await getDoc(doc(db, 'publicProfiles', cleanSlug));
     if (existingPub.exists()) {
       const pubData = existingPub.data() as PublicProfileRecord;
       existingPaymentConfirmed = Boolean(pubData.paymentConfirmed);
       existingLastPaidOrderId = pubData.lastPaidOrderId || '';
+      if (!existingAdminApproved && pubData.adminApproved) {
+        existingAdminApproved = true;
+        existingAdminApprovedAt = pubData.adminApprovedAt || '';
+        existingAdminApprovedBy = pubData.adminApprovedBy || '';
+      }
     } else if (previousSlug && previousSlug !== cleanSlug) {
       const prevPub = await getDoc(doc(db, 'publicProfiles', previousSlug));
       if (prevPub.exists()) {
         const pubData = prevPub.data() as PublicProfileRecord;
         existingPaymentConfirmed = Boolean(pubData.paymentConfirmed);
         existingLastPaidOrderId = pubData.lastPaidOrderId || '';
+        if (!existingAdminApproved && pubData.adminApproved) {
+          existingAdminApproved = true;
+          existingAdminApprovedAt = pubData.adminApprovedAt || '';
+          existingAdminApprovedBy = pubData.adminApprovedBy || '';
+        }
       }
     }
   } catch {
@@ -480,6 +543,13 @@ export async function saveProfileAndSyncPublic(
   batch.set(doc(db, 'publicProfiles', cleanSlug), {
     ...buildSanitizedPublicProfile(updatedProfile, inactiveMessage),
     paymentConfirmed: existingPaymentConfirmed,
+    ...(existingAdminApproved
+      ? {
+          adminApproved: true,
+          ...(existingAdminApprovedAt ? { adminApprovedAt: existingAdminApprovedAt } : {}),
+          ...(existingAdminApprovedBy ? { adminApprovedBy: existingAdminApprovedBy } : {}),
+        }
+      : { adminApproved: false }),
     ...(existingLastPaidOrderId ? { lastPaidOrderId: existingLastPaidOrderId } : {}),
     updatedAt: serverTimestamp(),
   });
@@ -549,6 +619,13 @@ export async function adminToggleProfileStatus(params: {
   batch.set(doc(db, 'publicProfiles', params.profile.slug), {
     ...buildSanitizedPublicProfile(updated, params.inactiveMessage),
     paymentConfirmed: existingPaymentConfirmed,
+    ...(params.profile.adminApproved
+      ? {
+          adminApproved: true,
+          ...(params.profile.adminApprovedAt ? { adminApprovedAt: params.profile.adminApprovedAt } : {}),
+          ...(params.profile.adminApprovedBy ? { adminApprovedBy: params.profile.adminApprovedBy } : {}),
+        }
+      : {}),
     ...(existingLastPaidOrderId ? { lastPaidOrderId: existingLastPaidOrderId } : {}),
     updatedAt: serverTimestamp(),
   });
@@ -563,6 +640,70 @@ export async function adminToggleProfileStatus(params: {
       targetId: params.profile.profileId,
       details: `${params.isPublic ? 'Enabled' : 'Disabled'} digital profile /p/${params.profile.slug}`,
     });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `profiles/${params.profile.profileId}`);
+  }
+}
+
+export async function adminSetProfileApproval(params: {
+  profile: ProfileRecord;
+  approved: boolean;
+  actor: { uid: string; email?: string; role: UserRole };
+  inactiveMessage?: string;
+}): Promise<ProfileRecord> {
+  const approvedAt = params.approved ? new Date().toISOString() : '';
+  const approvedBy = params.approved ? params.actor.email || params.actor.uid : '';
+  const updated: ProfileRecord = {
+    ...params.profile,
+    isPublic: params.approved ? true : params.profile.isPublic,
+    adminApproved: params.approved,
+    adminApprovedAt: approvedAt,
+    adminApprovedBy: approvedBy,
+  };
+
+  let existingPaymentConfirmed = false;
+  let existingLastPaidOrderId = '';
+  try {
+    const existingPub = await getDoc(doc(db, 'publicProfiles', params.profile.slug));
+    if (existingPub.exists()) {
+      const pubData = existingPub.data() as PublicProfileRecord;
+      existingPaymentConfirmed = Boolean(pubData.paymentConfirmed);
+      existingLastPaidOrderId = pubData.lastPaidOrderId || '';
+    }
+  } catch {
+    // ignore read fallback
+  }
+
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'profiles', params.profile.profileId), {
+    isPublic: updated.isPublic,
+    adminApproved: params.approved,
+    adminApprovedAt: approvedAt,
+    adminApprovedBy: approvedBy,
+    updatedAt: serverTimestamp(),
+  });
+  batch.set(doc(db, 'publicProfiles', params.profile.slug), {
+    ...buildSanitizedPublicProfile(updated, params.inactiveMessage),
+    paymentConfirmed: existingPaymentConfirmed,
+    adminApproved: params.approved,
+    adminApprovedAt: approvedAt,
+    adminApprovedBy: approvedBy,
+    ...(existingLastPaidOrderId ? { lastPaidOrderId: existingLastPaidOrderId } : {}),
+    updatedAt: serverTimestamp(),
+  });
+
+  try {
+    await batch.commit();
+    await recordAuditLog({
+      actorUid: params.actor.uid,
+      actorEmail: params.actor.email,
+      actorRole: params.actor.role,
+      action: params.approved ? 'ADMIN_APPROVE_PROFILE' : 'ADMIN_REVOKE_PROFILE_APPROVAL',
+      targetCollection: 'profiles',
+      targetId: params.profile.profileId,
+      details: `${params.approved ? 'Approved' : 'Revoked approval for'} /p/${params.profile.slug} (payment optional)`,
+    });
+    return updated;
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `profiles/${params.profile.profileId}`);
   }
@@ -594,18 +735,54 @@ export async function deleteDigitalProfile(params: {
 }
 
 // --- Card Templates & Designs ---
+export function sortCardTemplates(list: CardTemplateRecord[]): CardTemplateRecord[] {
+  return [...list].sort((a, b) => {
+    const defDiff = (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0);
+    if (defDiff !== 0) return defDiff;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function toFirestoreCardTemplate(t: CardTemplateRecord): Omit<CardTemplateRecord, 'updatedAt'> {
+  return {
+    templateId: t.templateId,
+    name: t.name,
+    category: t.category || 'Executive',
+    description: t.description || '',
+    priceInr: Math.max(0, Number(t.priceInr) || 0),
+    cardType: t.cardType || 'Matte PVC NFC',
+    active: Boolean(t.active),
+    isDefault: Boolean(t.isDefault),
+    supportsVertical: Boolean(t.supportsVertical),
+    frontSpec: t.frontSpec,
+    backSpec: t.backSpec,
+  };
+}
+
 export async function getCardTemplates(includeInactive = false): Promise<CardTemplateRecord[]> {
   try {
     const snap = await getDocs(collection(db, 'cardTemplates'));
     if (snap.empty) {
-      return includeInactive ? DEFAULT_CARD_TEMPLATES : DEFAULT_CARD_TEMPLATES.filter((t) => t.active);
+      const sorted = sortCardTemplates(DEFAULT_CARD_TEMPLATES);
+      return includeInactive ? sorted : sorted.filter((t) => t.active);
     }
-    const items = snap.docs
-      .map((d) => d.data() as CardTemplateRecord)
-      .sort((a, b) => a.name.localeCompare(b.name));
+    const stored = snap.docs.map((d) => d.data() as CardTemplateRecord);
+    const storedIds = new Set(stored.map((t) => t.templateId));
+    const hasAzureWaves = storedIds.has('azure-tech-waves');
+    const hasExplicitNonNavyDefault = stored.some((t) => t.isDefault && t.templateId !== 'premium-navy');
+    const normalizedStored =
+      !hasAzureWaves && !hasExplicitNonNavyDefault
+        ? stored.map((t) => (t.templateId === 'premium-navy' ? { ...t, isDefault: false } : t))
+        : stored;
+    const anyStoredDefault = normalizedStored.some((t) => t.isDefault);
+    const missingDefaults = DEFAULT_CARD_TEMPLATES.filter((d) => !storedIds.has(d.templateId)).map((d) =>
+      anyStoredDefault ? { ...d, isDefault: false } : d
+    );
+    const items = sortCardTemplates([...normalizedStored, ...missingDefaults]);
     return includeInactive ? items : items.filter((t) => t.active);
   } catch {
-    return includeInactive ? DEFAULT_CARD_TEMPLATES : DEFAULT_CARD_TEMPLATES.filter((t) => t.active);
+    const sorted = sortCardTemplates(DEFAULT_CARD_TEMPLATES);
+    return includeInactive ? sorted : sorted.filter((t) => t.active);
   }
 }
 
@@ -616,25 +793,44 @@ export async function saveCardTemplate(
   const path = `cardTemplates/${template.templateId}`;
   try {
     const existingSnap = await getDocs(collection(db, 'cardTemplates'));
-    if (existingSnap.empty) {
-      const batch = writeBatch(db);
+    const normalizedInput: CardTemplateRecord = {
+      ...template,
+      active: template.isDefault ? true : Boolean(template.active),
+      isDefault: Boolean(template.isDefault),
+    };
+
+    const existingList = existingSnap.docs.map((d) => d.data() as CardTemplateRecord);
+    const existingIds = new Set(existingList.map((t) => t.templateId));
+    const missingDefaults = DEFAULT_CARD_TEMPLATES.filter((d) => !existingIds.has(d.templateId));
+
+    if (existingSnap.empty || missingDefaults.length > 0 || normalizedInput.isDefault) {
+      const mergedMap = new Map<string, CardTemplateRecord>();
       for (const def of DEFAULT_CARD_TEMPLATES) {
-        const merged = def.templateId === template.templateId ? template : def;
-        batch.set(doc(db, 'cardTemplates', merged.templateId), {
-          ...merged,
-          updatedAt: serverTimestamp(),
-        });
+        mergedMap.set(def.templateId, def);
       }
-      if (!DEFAULT_CARD_TEMPLATES.some((d) => d.templateId === template.templateId)) {
-        batch.set(doc(db, 'cardTemplates', template.templateId), {
-          ...template,
+      for (const ex of existingList) {
+        mergedMap.set(ex.templateId, ex);
+      }
+      mergedMap.set(normalizedInput.templateId, normalizedInput);
+
+      const batch = writeBatch(db);
+      for (const item of mergedMap.values()) {
+        const finalItem: CardTemplateRecord = normalizedInput.isDefault
+          ? {
+              ...item,
+              isDefault: item.templateId === normalizedInput.templateId,
+              active: item.templateId === normalizedInput.templateId ? true : item.active,
+            }
+          : item;
+        batch.set(doc(db, 'cardTemplates', finalItem.templateId), {
+          ...toFirestoreCardTemplate(finalItem),
           updatedAt: serverTimestamp(),
         });
       }
       await batch.commit();
     } else {
-      await setDoc(doc(db, 'cardTemplates', template.templateId), {
-        ...template,
+      await setDoc(doc(db, 'cardTemplates', normalizedInput.templateId), {
+        ...toFirestoreCardTemplate(normalizedInput),
         updatedAt: serverTimestamp(),
       });
     }
@@ -644,11 +840,96 @@ export async function saveCardTemplate(
       actorRole: actor.role,
       action: 'SAVE_CARD_TEMPLATE',
       targetCollection: 'cardTemplates',
-      targetId: template.templateId,
-      details: `Saved template ${template.name} (₹${template.priceInr})`,
+      targetId: normalizedInput.templateId,
+      details: `Saved template ${normalizedInput.name} (₹${normalizedInput.priceInr}, visible=${normalizedInput.active}, default=${Boolean(normalizedInput.isDefault)})`,
     });
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export async function setDefaultCardTemplate(
+  templateId: string,
+  actor: { uid: string; email?: string; role: UserRole }
+): Promise<void> {
+  const path = `cardTemplates/${templateId}`;
+  try {
+    const existingSnap = await getDocs(collection(db, 'cardTemplates'));
+    const mergedMap = new Map<string, CardTemplateRecord>();
+    for (const def of DEFAULT_CARD_TEMPLATES) {
+      mergedMap.set(def.templateId, def);
+    }
+    for (const d of existingSnap.docs) {
+      const rec = d.data() as CardTemplateRecord;
+      mergedMap.set(rec.templateId, rec);
+    }
+    const target = mergedMap.get(templateId);
+    if (!target) {
+      throw new Error(`Template ${templateId} not found.`);
+    }
+    const batch = writeBatch(db);
+    for (const item of mergedMap.values()) {
+      const isSelectedDefault = item.templateId === templateId;
+      batch.set(doc(db, 'cardTemplates', item.templateId), {
+        ...toFirestoreCardTemplate({
+          ...item,
+          isDefault: isSelectedDefault,
+          active: isSelectedDefault ? true : item.active,
+        }),
+        updatedAt: serverTimestamp(),
+      });
+    }
+    await batch.commit();
+    await recordAuditLog({
+      actorUid: actor.uid,
+      actorEmail: actor.email,
+      actorRole: actor.role,
+      action: 'SET_DEFAULT_CARD_TEMPLATE',
+      targetCollection: 'cardTemplates',
+      targetId: templateId,
+      details: `Set "${target.name}" as default card template`,
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export async function setBulkCardTemplatesVisibility(
+  active: boolean,
+  actor: { uid: string; email?: string; role: UserRole }
+): Promise<void> {
+  try {
+    const existingSnap = await getDocs(collection(db, 'cardTemplates'));
+    const mergedMap = new Map<string, CardTemplateRecord>();
+    for (const def of DEFAULT_CARD_TEMPLATES) {
+      mergedMap.set(def.templateId, def);
+    }
+    for (const d of existingSnap.docs) {
+      const rec = d.data() as CardTemplateRecord;
+      mergedMap.set(rec.templateId, rec);
+    }
+    const batch = writeBatch(db);
+    for (const item of mergedMap.values()) {
+      batch.set(doc(db, 'cardTemplates', item.templateId), {
+        ...toFirestoreCardTemplate({
+          ...item,
+          active,
+        }),
+        updatedAt: serverTimestamp(),
+      });
+    }
+    await batch.commit();
+    await recordAuditLog({
+      actorUid: actor.uid,
+      actorEmail: actor.email,
+      actorRole: actor.role,
+      action: 'BULK_TOGGLE_CARD_TEMPLATES',
+      targetCollection: 'cardTemplates',
+      targetId: 'all',
+      details: `Set all templates visibility to ${active ? 'enabled' : 'disabled'}`,
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'cardTemplates');
   }
 }
 
@@ -663,7 +944,7 @@ export async function deleteCardTemplate(
       for (const def of DEFAULT_CARD_TEMPLATES) {
         if (def.templateId !== templateId) {
           batch.set(doc(db, 'cardTemplates', def.templateId), {
-            ...def,
+            ...toFirestoreCardTemplate(def),
             updatedAt: serverTimestamp(),
           });
         }
@@ -847,7 +1128,7 @@ export async function finalizeVerifiedOrderPayment(params: {
   orderId: string;
   uid: string;
   profileSlug?: string;
-  gateway: 'razorpay_live' | 'razorpay_sandbox';
+  gateway: PaymentRecord['gateway'];
   gatewayOrderId: string;
   gatewayPaymentId: string;
   amount: number;

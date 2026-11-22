@@ -142,7 +142,7 @@ export const PublicLayout: React.FC<{ children: React.ReactNode }> = ({ children
               />
             </Link>
             <p className="mt-3 text-sm text-slate-400 leading-relaxed">
-              Precision-printed 85.6 × 54 mm NFC smart business cards paired with real-time digital business identities across India.
+              Premium smart business cards paired with seamless digital identity integration, enabling instant contact sharing and real-time digital networking across India.
             </p>
           </div>
 
@@ -161,7 +161,7 @@ export const PublicLayout: React.FC<{ children: React.ReactNode }> = ({ children
             <ul className="space-y-2 text-sm text-slate-400">
               <li><Link to="/guide" className="hover:text-white transition-colors">Complete User Guide (PDF)</Link></li>
               <li><Link to="/faq" className="hover:text-white transition-colors">FAQ</Link></li>
-              <li><Link to="/nfc-guide" className="hover:text-white transition-colors">NFC Compatibility Guide</Link></li>
+              <li><Link to="/nfc-guide" className="hover:text-white transition-colors">Smartcard Compatibility Guide</Link></li>
               <li><Link to="/contact" className="hover:text-white transition-colors">Contact Support</Link></li>
               <li><Link to="/login" className="hover:text-white transition-colors">Portal Login</Link></li>
             </ul>

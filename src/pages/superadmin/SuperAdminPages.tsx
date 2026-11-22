@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { QrCode, Download, ShieldCheck, CheckCircle2, AlertTriangle, Trash2, RotateCcw } from 'lucide-react';
+import { QrCode, Download, ShieldCheck, CheckCircle2, AlertTriangle, Trash2, RotateCcw, CreditCard, Settings } from 'lucide-react';
 import { PortalLayout } from '../../components/PortalLayout';
+import { PaymentGatewaySettingsPanel } from '../../components/PaymentGatewaySettingsPanel';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import {
@@ -13,13 +14,42 @@ import {
   updateUserRoleAndStatus,
   type ApplicationResetResult,
 } from '../../lib/firestoreService';
-import { ALL_ADMIN_PERMISSIONS } from '../../lib/constants';
+import { ALL_ADMIN_PERMISSIONS, PAYMENT_GATEWAY_ORDER } from '../../lib/constants';
 import { downloadBlob } from '../../lib/printPdf';
 import { generateHighResQrArtwork } from '../../lib/qrArtwork';
 import type { AdminPermission, QrCodeRecord, UserRecord, UserRole } from '../../types';
 
+const SuperAdminRolesHubTabs: React.FC = () => {
+  const location = useLocation();
+  const tabs = [
+    { label: 'Roles & Administrators', to: '/superadmin/roles' },
+    { label: 'Admin Permissions Matrix', to: '/superadmin/permissions' },
+  ];
+  return (
+    <div className="mb-5 flex flex-wrap gap-2 bg-white border border-slate-200 rounded-2xl p-2">
+      {tabs.map((tab) => {
+        const active = location.pathname === tab.to;
+        return (
+          <Link
+            key={tab.to}
+            to={tab.to}
+            className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors ${
+              active
+                ? 'bg-[#0B1D3A] text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-[#0B1D3A]'
+            }`}
+          >
+            {tab.label}
+          </Link>
+        );
+      })}
+    </div>
+  );
+};
+
 // 1. SuperAdmin Dashboard
 export const SuperAdminDashboardPage: React.FC = () => {
+  const { appSettings } = useAuth();
   const [health, setHealth] = useState<{
     razorpayMode?: string;
     resendConfigured?: boolean;
@@ -35,6 +65,10 @@ export const SuperAdminDashboardPage: React.FC = () => {
       .catch(() => null);
   }, []);
 
+  const enabledGateways = PAYMENT_GATEWAY_ORDER.filter(
+    (id) => appSettings.paymentGateways?.[id]?.enabled ?? true
+  );
+
   return (
     <PortalLayout portal="superadmin" title="SuperAdmin Command Center">
       <div className="space-y-6">
@@ -46,18 +80,27 @@ export const SuperAdminDashboardPage: React.FC = () => {
             </div>
             <h2 className="font-display text-2xl font-bold mt-1">SuperAdmin Control Plane</h2>
             <p className="text-xs text-slate-300 mt-1">
-              Manage administrators, RBAC permissions, direct URL QR generation, pricing, taxes, and global feature flags.
+              Manage administrators, RBAC permissions, multi-gateway checkout, direct URL QR generation, pricing, and global feature flags.
             </p>
           </div>
+          <Link
+            to="/superadmin/system-settings?tab=gateways"
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#1D4ED8] hover:bg-[#1E40AF] text-white text-xs font-semibold rounded-xl shrink-0"
+          >
+            <CreditCard className="h-4 w-4" />
+            <span>Configure Payment Gateways</span>
+          </Link>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-white border border-slate-200 rounded-xl p-5">
-            <div className="text-xs text-slate-500">Payment Gateway Mode</div>
+            <div className="text-xs text-slate-500">Active Payment Gateways</div>
             <div className="mt-1.5 font-display text-lg font-bold text-[#0B1D3A]">
-              {health?.razorpayMode === 'live' ? 'Razorpay Live' : 'Razorpay Sandbox (HMAC)'}
+              {enabledGateways.length} / {PAYMENT_GATEWAY_ORDER.length} Enabled
             </div>
-            <p className="mt-1 text-xs text-slate-500">Configure RAZORPAY_KEY_ID & RAZORPAY_KEY_SECRET in server env for live.</p>
+            <p className="mt-1 text-xs text-slate-500">
+              Razorpay ({health?.razorpayMode === 'live' ? 'Live' : 'Sandbox'}), Cashfree, Easebuzz, PayU, GPay &amp; UPI.
+            </p>
           </div>
           <div className="bg-white border border-slate-200 rounded-xl p-5">
             <div className="text-xs text-slate-500">Transactional Email (Resend)</div>
@@ -129,6 +172,7 @@ export const SuperAdminRolesPage: React.FC = () => {
 
   return (
     <PortalLayout portal="superadmin" title="Role & Administrator Control">
+      <SuperAdminRolesHubTabs />
       <div className="bg-white border border-slate-200 rounded-2xl overflow-x-auto">
         <table className="w-full text-left text-xs">
           <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
@@ -193,6 +237,7 @@ export const SuperAdminPermissionsPage: React.FC = () => {
 
   return (
     <PortalLayout portal="superadmin" title="Configurable Admin Permissions">
+      <SuperAdminRolesHubTabs />
       {admins.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-sm text-slate-600">
           No ADMIN accounts configured yet. Promote a user to ADMIN in Roles & Administrators to configure their permissions.
@@ -405,6 +450,14 @@ export const SuperAdminSystemSettingsPage: React.FC = () => {
   const [form, setForm] = useState(appSettings);
   const [saving, setSaving] = useState(false);
 
+  const initialTab = (() => {
+    const param = new URLSearchParams(location.search).get('tab');
+    if (param === 'gateways') return 'gateways' as const;
+    if (param === 'reset' || location.hash === '#factory-reset') return 'reset' as const;
+    return 'pricing' as const;
+  })();
+  const [activeTab, setActiveTab] = useState<'pricing' | 'gateways' | 'reset'>(initialTab);
+
   const [includeAuditLogs, setIncludeAuditLogs] = useState(true);
   const [restoreDefaultCatalog, setRestoreDefaultCatalog] = useState(true);
   const [confirmText, setConfirmText] = useState('');
@@ -414,11 +467,13 @@ export const SuperAdminSystemSettingsPage: React.FC = () => {
   useEffect(() => { setForm(appSettings); }, [appSettings]);
 
   useEffect(() => {
-    if (location.hash === '#factory-reset') {
-      const el = document.getElementById('factory-reset');
-      el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const param = new URLSearchParams(location.search).get('tab');
+    if (param === 'gateways' || param === 'pricing' || param === 'reset') {
+      setActiveTab(param);
+    } else if (location.hash === '#factory-reset') {
+      setActiveTab('reset');
     }
-  }, [location.hash]);
+  }, [location.hash, location.search]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -468,9 +523,53 @@ export const SuperAdminSystemSettingsPage: React.FC = () => {
   };
 
   return (
-    <PortalLayout portal="superadmin" title="Global System Settings">
-      <div className="space-y-8 max-w-3xl">
-        <form onSubmit={handleSave} className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
+    <PortalLayout portal="superadmin" title="Payment Gateways & System Settings">
+      <div className="mb-6 flex flex-wrap gap-2 bg-white border border-slate-200 rounded-2xl p-2 max-w-4xl">
+        <button
+          type="button"
+          onClick={() => setActiveTab('pricing')}
+          className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold transition-colors ${
+            activeTab === 'pricing'
+              ? 'bg-[#0B1D3A] text-white'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Settings className="h-3.5 w-3.5" />
+          <span>Pricing &amp; Global Policies</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('gateways')}
+          className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold transition-colors ${
+            activeTab === 'gateways'
+              ? 'bg-[#0B1D3A] text-white'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <CreditCard className="h-3.5 w-3.5" />
+          <span>Payment Gateways (6 Providers)</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('reset')}
+          className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold transition-colors ${
+            activeTab === 'reset'
+              ? 'bg-rose-600 text-white'
+              : 'text-rose-700 hover:bg-rose-50'
+          }`}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          <span>Danger Zone / Factory Reset</span>
+        </button>
+      </div>
+
+      {activeTab === 'gateways' ? (
+        <div className="max-w-4xl">
+          <PaymentGatewaySettingsPanel />
+        </div>
+      ) : activeTab === 'pricing' ? (
+        <div className="space-y-8 max-w-3xl">
+          <form onSubmit={handleSave} className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Company Brand Name</label>
@@ -566,7 +665,9 @@ export const SuperAdminSystemSettingsPage: React.FC = () => {
             <span>{saving ? 'Saving...' : 'Save Global Settings'}</span>
           </button>
         </form>
-
+        </div>
+      ) : (
+        <div className="space-y-8 max-w-3xl">
         {/* Danger Zone: Factory Reset */}
         <section
           id="factory-reset"
@@ -668,6 +769,7 @@ export const SuperAdminSystemSettingsPage: React.FC = () => {
           )}
         </section>
       </div>
+      )}
     </PortalLayout>
   );
 };

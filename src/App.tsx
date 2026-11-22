@@ -195,10 +195,18 @@ export default function App() {
               }
             />
             <Route
+              path="/dashboard/tracking"
+              element={
+                <ProtectedRoute allowedRoles={['USER', 'PRINTER', 'ADMIN', 'SUPERADMIN']}>
+                  <CustomerOrdersPage initialTab="tracking" />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/dashboard/orders/:orderId"
               element={
                 <ProtectedRoute allowedRoles={['USER', 'PRINTER', 'ADMIN', 'SUPERADMIN']}>
-                  <CustomerOrdersPage />
+                  <CustomerOrdersPage initialTab="tracking" />
                 </ProtectedRoute>
               }
             />

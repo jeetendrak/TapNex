@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import {
   BarChart,
   Bar,
@@ -33,14 +33,21 @@ import {
   QrCode,
   FileText,
   ArrowRight,
+  Eye,
+  ShieldCheck,
+  CreditCard,
+  Star,
+  CheckSquare,
 } from 'lucide-react';
 import { PortalLayout } from '../../components/PortalLayout';
 import { CardCanvasPreview } from '../../components/CardCanvasPreview';
 import { TemplateVisualEditorModal } from '../../components/TemplateVisualEditorModal';
 import { FulfilmentTimeline } from '../../components/FulfilmentTimeline';
+import { PaymentGatewaySettingsPanel } from '../../components/PaymentGatewaySettingsPanel';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import {
+  adminSetProfileApproval,
   adminToggleProfileStatus,
   createManagedUserRecord,
   deleteCardDesign,
@@ -73,6 +80,8 @@ import {
   savePrinterRecord,
   sendAndLogTransactionalEmail,
   sendApprovedDesignToPrint,
+  setBulkCardTemplatesVisibility,
+  setDefaultCardTemplate,
   updateOrderAndPaymentStatus,
   updateOrderWorkflow,
   updateSupportTicket,
@@ -107,6 +116,292 @@ import type {
 const PAYMENT_STATUS_OPTIONS: PaymentStatus[] = ['Pending', 'Completed', 'Verified', 'Rejected', 'Failed', 'Refunded'];
 
 const CHART_COLORS = ['#0B1D3A', '#1D4ED8', '#06B6D4', '#16A34A', '#D97706', '#64748B'];
+
+const AdminHubTabBar: React.FC<{ tabs: { label: string; to: string }[] }> = ({ tabs }) => {
+  const location = useLocation();
+  return (
+    <div className="mb-5 flex flex-wrap gap-2 bg-white border border-slate-200 rounded-2xl p-2">
+      {tabs.map((tab) => {
+        const active =
+          location.pathname === tab.to ||
+          (tab.to !== '/admin/orders' && location.pathname.startsWith(`${tab.to}/`)) ||
+          (tab.to === '/admin/orders' && location.pathname.startsWith('/admin/orders'));
+        return (
+          <Link
+            key={tab.to}
+            to={tab.to}
+            className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors ${
+              active
+                ? 'bg-[#0B1D3A] text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-[#0B1D3A]'
+            }`}
+          >
+            {tab.label}
+          </Link>
+        );
+      })}
+    </div>
+  );
+};
+
+const AdminUsersHubTabs = () => (
+  <AdminHubTabBar
+    tabs={[
+      { label: 'Users & Customers', to: '/admin/users' },
+      { label: 'Digital Profiles & Approvals', to: '/admin/profiles' },
+      { label: 'Print Partners', to: '/admin/printers' },
+    ]}
+  />
+);
+
+const AdminCardsHubTabs = () => (
+  <AdminHubTabBar
+    tabs={[
+      { label: 'Card Templates', to: '/admin/card-designs' },
+      { label: 'Approved Designs & Print', to: '/admin/approved-designs' },
+    ]}
+  />
+);
+
+const AdminOrdersHubTabs = () => (
+  <AdminHubTabBar
+    tabs={[
+      { label: 'Orders & Status', to: '/admin/orders' },
+      { label: 'Payment Transactions', to: '/admin/payments' },
+      { label: 'Shipping & Dispatch', to: '/admin/shipping' },
+    ]}
+  />
+);
+
+const AdminOpsHubTabs = () => (
+  <AdminHubTabBar
+    tabs={[
+      { label: 'Gateways, Support & Email', to: '/admin/settings' },
+      { label: 'QR Management', to: '/admin/qr-management' },
+      { label: 'Reports & Export', to: '/admin/reports' },
+      { label: 'Audit Logs', to: '/admin/audit-logs' },
+    ]}
+  />
+);
+
+const AdminProfileInspectorModal: React.FC<{
+  profile: ProfileRecord;
+  owner?: UserRecord | null;
+  paid: boolean;
+  onClose: () => void;
+  onToggleApproval: (profile: ProfileRecord) => Promise<void>;
+  onToggleActive: (profile: ProfileRecord) => Promise<void>;
+}> = ({ profile, owner, paid, onClose, onToggleApproval, onToggleActive }) => {
+  const [busy, setBusy] = useState(false);
+  const info = profile.personalInformation || ({} as PersonalInformation);
+  const vis = profile.visibilitySettings;
+
+  const detailRows: { label: string; value?: string; visible: boolean }[] = [
+    { label: 'Full Name', value: info.fullName, visible: vis.fullName },
+    { label: 'Job Title', value: info.jobTitle, visible: vis.jobTitle },
+    { label: 'Company', value: info.companyName, visible: vis.companyName },
+    { label: 'Category', value: info.businessCategory, visible: vis.businessCategory },
+    { label: 'Mobile', value: info.mobile, visible: vis.mobile },
+    { label: 'Alternate Mobile', value: info.alternateMobile, visible: vis.alternateMobile },
+    { label: 'WhatsApp', value: info.whatsapp, visible: vis.whatsapp },
+    { label: 'Email', value: info.email, visible: vis.email },
+    { label: 'Alternate Email', value: info.alternateEmail, visible: vis.alternateEmail },
+    { label: 'Website', value: info.website, visible: vis.website },
+    { label: 'Business Address', value: info.businessAddress, visible: vis.businessAddress },
+    { label: 'Personal Address', value: info.personalAddress, visible: Boolean(vis.personalAddress) },
+    {
+      label: 'City / State / PIN',
+      value: [info.city, info.state, info.pinCode, info.country].filter(Boolean).join(', '),
+      visible: vis.businessAddress,
+    },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden my-auto">
+        <div className="px-6 py-4 bg-[#0B1D3A] text-white flex items-center justify-between">
+          <div className="min-w-0">
+            <div className="text-[11px] font-mono text-cyan-300">/p/{profile.slug}</div>
+            <h3 className="font-display font-bold text-base truncate">
+              {info.fullName || profile.profileLabel || profile.slug}
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5 max-h-[80vh] overflow-y-auto">
+          <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
+            <div className="flex items-center gap-3">
+              {info.photoDataUrl ? (
+                <img
+                  src={info.photoDataUrl}
+                  alt={info.fullName || profile.slug}
+                  className="w-14 h-14 rounded-full object-cover border border-slate-200"
+                />
+              ) : (
+                <div className="w-14 h-14 rounded-full bg-[#0B1D3A] text-white flex items-center justify-center font-bold text-lg">
+                  {(info.fullName || profile.slug || 'U').slice(0, 1).toUpperCase()}
+                </div>
+              )}
+              <div>
+                <div className="text-sm font-bold text-[#0B1D3A]">
+                  {profile.profileLabel || 'Digital Profile'}
+                </div>
+                <div className="text-xs text-slate-500">
+                  Owner: {owner?.email || profile.uid} · Template: {profile.selectedTemplate}
+                </div>
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  <span
+                    className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                      paid ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                    }`}
+                  >
+                    {paid ? 'Payment Confirmed' : 'Payment Pending'}
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                      profile.adminApproved
+                        ? 'bg-blue-100 text-blue-800'
+                        : 'bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {profile.adminApproved ? 'Admin Approved (Live Link Active)' : 'Not Admin Approved'}
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                      profile.isPublic ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                    }`}
+                  >
+                    {profile.isPublic ? 'Public Enabled' : 'Disabled'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <a
+                href={`/p/${profile.slug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#0B1D3A] text-white text-xs font-semibold rounded-lg"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                <span>Open Public Profile</span>
+              </a>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await onToggleApproval(profile);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg disabled:opacity-50 ${
+                  profile.adminApproved
+                    ? 'border border-amber-300 bg-amber-50 text-amber-900'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                }`}
+              >
+                <ShieldCheck className="h-3.5 w-3.5" />
+                <span>
+                  {profile.adminApproved ? 'Revoke Manual Approval' : 'Approve Profile Link (No Payment)'}
+                </span>
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await onToggleActive(profile);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-semibold rounded-lg disabled:opacity-50"
+              >
+                <Power className="h-3.5 w-3.5" />
+                <span>{profile.isPublic ? 'Disable' : 'Enable'}</span>
+              </button>
+            </div>
+          </div>
+
+          {info.shortBio && (
+            <div className="p-3.5 rounded-xl border border-slate-200 text-xs text-slate-700">
+              <div className="font-semibold text-[#0B1D3A] mb-1">
+                Short Bio ({vis.shortBio ? 'Visible publicly' : 'Hidden from public'})
+              </div>
+              <p>{info.shortBio}</p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {detailRows.map((row) => (
+              <div key={row.label} className="p-3 rounded-xl border border-slate-200 text-xs">
+                <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                  <span>{row.label}</span>
+                  <span className={row.visible ? 'text-emerald-700 font-semibold' : 'text-slate-400'}>
+                    {row.visible ? 'Public' : 'Private'}
+                  </span>
+                </div>
+                <div className="mt-1 font-medium text-[#0B1D3A] break-words">
+                  {row.value || '—'}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="p-4 rounded-xl border border-slate-200 space-y-2">
+              <div className="text-xs font-bold text-[#0B1D3A]">
+                Social Links ({(profile.socialLinks || []).length})
+              </div>
+              {(profile.socialLinks || []).length === 0 ? (
+                <div className="text-xs text-slate-400">No social links added.</div>
+              ) : (
+                <div className="space-y-1.5">
+                  {(profile.socialLinks || []).map((s) => (
+                    <div key={s.id} className="text-xs flex items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-700 truncate">{s.label}</span>
+                      <span className="font-mono text-[11px] text-slate-500 truncate">{s.url}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 rounded-xl border border-slate-200 space-y-2">
+              <div className="text-xs font-bold text-[#0B1D3A]">
+                Custom Fields ({(profile.customFields || []).length})
+              </div>
+              {(profile.customFields || []).length === 0 ? (
+                <div className="text-xs text-slate-400">No custom fields added.</div>
+              ) : (
+                <div className="space-y-1.5">
+                  {(profile.customFields || []).map((c) => (
+                    <div key={c.id} className="text-xs flex items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-700 truncate">{c.label}</span>
+                      <span className="text-slate-500 truncate">{c.value}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // 1. Admin Dashboard with Analytics Charts
 export const AdminDashboardPage: React.FC = () => {
@@ -334,6 +629,7 @@ export const AdminUsersPage: React.FC = () => {
 
   return (
     <PortalLayout portal="admin" title="Users & Customers">
+      <AdminUsersHubTabs />
       <div className="space-y-6">
         <form onSubmit={handleCreate} className="bg-white border border-slate-200 rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
           <div>
@@ -509,23 +805,57 @@ export const AdminUserDetailPage: React.FC = () => {
   const { notify, confirmAction } = useToast();
   const [user, setUser] = useState<UserRecord | null>(null);
   const [profiles, setProfiles] = useState<ProfileRecord[]>([]);
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [inspectedProfile, setInspectedProfile] = useState<ProfileRecord | null>(null);
 
   const load = () => {
     if (!uid) return;
     getUserById(uid).then(setUser);
     getUserProfiles(uid).then(setProfiles);
+    getAllOrders().then(setOrders);
   };
 
   useEffect(() => {
     load();
   }, [uid]);
 
+  const handleToggleApproval = async (p: ProfileRecord) => {
+    if (!userRecord) return;
+    const updated = await adminSetProfileApproval({
+      profile: p,
+      approved: !p.adminApproved,
+      actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+      inactiveMessage: appSettings.inactiveProfileMessage,
+    });
+    notify(
+      updated.adminApproved ? 'Profile approved without payment' : 'Manual approval revoked',
+      `/p/${p.slug}`,
+      'success'
+    );
+    setInspectedProfile((curr) => (curr?.profileId === p.profileId ? updated : curr));
+    load();
+  };
+
+  const handleTogglePublic = async (p: ProfileRecord) => {
+    if (!userRecord) return;
+    await adminToggleProfileStatus({
+      profile: p,
+      isPublic: !p.isPublic,
+      actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+      inactiveMessage: appSettings.inactiveProfileMessage,
+    });
+    notify(p.isPublic ? 'Profile disabled' : 'Profile enabled', `/p/${p.slug}`, 'success');
+    setInspectedProfile((curr) => (curr?.profileId === p.profileId ? { ...p, isPublic: !p.isPublic } : curr));
+    load();
+  };
+
   return (
     <PortalLayout portal="admin" title="User Account Detail">
+      <AdminUsersHubTabs />
       {!user ? (
         <div className="bg-white border border-slate-200 rounded-2xl p-6 text-sm text-slate-500">Loading user...</div>
       ) : (
-        <div className="space-y-6 max-w-3xl">
+        <div className="space-y-6 max-w-4xl">
           <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
             <h2 className="font-display text-xl font-bold text-[#0B1D3A]">{user.displayName || user.email}</h2>
             <div className="grid grid-cols-2 gap-4 text-sm">
@@ -552,68 +882,105 @@ export const AdminUserDetailPage: React.FC = () => {
               <p className="text-xs text-slate-500">No digital profiles created by this user.</p>
             ) : (
               <div className="space-y-3">
-                {profiles.map((p) => (
-                  <div key={p.profileId} className="p-4 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div>
-                      <div className="font-semibold text-sm text-[#0B1D3A]">{p.profileLabel || p.personalInformation.fullName || p.slug}</div>
-                      <div className="text-xs font-mono text-slate-500">/p/{p.slug} · {p.isPublic ? 'Enabled' : 'Disabled'}</div>
+                {profiles.map((p) => {
+                  const paid = orders.some(
+                    (o) =>
+                      o.profileId === p.profileId &&
+                      (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed')
+                  );
+                  return (
+                    <div key={p.profileId} className="p-4 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <div className="font-semibold text-sm text-[#0B1D3A]">
+                          {p.profileLabel || p.personalInformation.fullName || p.slug}
+                        </div>
+                        <div className="text-xs font-mono text-slate-500">
+                          /p/{p.slug} · {p.isPublic ? 'Enabled' : 'Disabled'} ·{' '}
+                          {paid ? 'Paid' : p.adminApproved ? 'Admin Approved' : 'Payment Pending'}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setInspectedProfile(p)}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 border border-[#1D4ED8]/30 bg-blue-50/70 text-[#1D4ED8] rounded-lg text-xs font-semibold hover:bg-blue-100"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          <span>Inspect Profile</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleApproval(p)}
+                          className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                            p.adminApproved
+                              ? 'border border-amber-300 bg-amber-50 text-amber-800'
+                              : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          }`}
+                        >
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                          <span>{p.adminApproved ? 'Revoke Approval' : 'Approve Link'}</span>
+                        </button>
+                        <a
+                          href={`/p/${p.slug}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          <span>Public View</span>
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => handleTogglePublic(p)}
+                          className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold hover:bg-slate-50"
+                        >
+                          {p.isPublic ? 'Disable' : 'Enable'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!userRecord) return;
+                            const ok = await confirmAction({
+                              title: 'Delete Digital Profile',
+                              message: `Permanently delete /p/${p.slug}?`,
+                              destructive: true,
+                              confirmLabel: 'Delete',
+                            });
+                            if (!ok) return;
+                            await deleteDigitalProfile({
+                              profile: p,
+                              actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+                            });
+                            notify('Digital profile deleted', `/p/${p.slug}`, 'success');
+                            load();
+                          }}
+                          className="px-3 py-1.5 border border-rose-200 text-rose-600 rounded-lg text-xs font-semibold hover:bg-rose-50"
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <a
-                        href={`/p/${p.slug}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        <span>View</span>
-                      </a>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          if (!userRecord) return;
-                          await adminToggleProfileStatus({
-                            profile: p,
-                            isPublic: !p.isPublic,
-                            actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
-                            inactiveMessage: appSettings.inactiveProfileMessage,
-                          });
-                          notify(p.isPublic ? 'Profile disabled' : 'Profile enabled', `/p/${p.slug}`, 'success');
-                          load();
-                        }}
-                        className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold hover:bg-slate-50"
-                      >
-                        {p.isPublic ? 'Disable' : 'Enable'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          if (!userRecord) return;
-                          const ok = await confirmAction({
-                            title: 'Delete Digital Profile',
-                            message: `Permanently delete /p/${p.slug}?`,
-                            destructive: true,
-                            confirmLabel: 'Delete',
-                          });
-                          if (!ok) return;
-                          await deleteDigitalProfile({
-                            profile: p,
-                            actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
-                          });
-                          notify('Digital profile deleted', `/p/${p.slug}`, 'success');
-                          load();
-                        }}
-                        className="px-3 py-1.5 border border-rose-200 text-rose-600 rounded-lg text-xs font-semibold hover:bg-rose-50"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
         </div>
+      )}
+
+      {inspectedProfile && (
+        <AdminProfileInspectorModal
+          profile={inspectedProfile}
+          owner={user}
+          paid={orders.some(
+            (o) =>
+              o.profileId === inspectedProfile.profileId &&
+              (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed')
+          )}
+          onClose={() => setInspectedProfile(null)}
+          onToggleApproval={handleToggleApproval}
+          onToggleActive={handleTogglePublic}
+        />
       )}
     </PortalLayout>
   );
@@ -662,6 +1029,7 @@ export const AdminPrintersPage: React.FC = () => {
 
   return (
     <PortalLayout portal="admin" title="Print Partners Management">
+      <AdminUsersHubTabs />
       <div className="space-y-6">
         <form onSubmit={handleAddPrinter} className="bg-white border border-slate-200 rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
           <div>
@@ -785,6 +1153,7 @@ export const AdminOrdersPage: React.FC = () => {
 
   return (
     <PortalLayout portal="admin" title="Orders & Payment Status Dashboard">
+      <AdminOrdersHubTabs />
       <div className="space-y-5">
         {/* Payment & Order KPIs */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1495,6 +1864,7 @@ export const AdminPaymentsPage: React.FC = () => {
   useEffect(() => { getAllPayments().then(setPayments); }, []);
   return (
     <PortalLayout portal="admin" title="Payment Transactions">
+      <AdminOrdersHubTabs />
       <div className="bg-white border border-slate-200 rounded-2xl overflow-x-auto">
         <table className="w-full text-left text-xs">
           <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
@@ -1530,19 +1900,26 @@ export const AdminCardTemplatesPage: React.FC = () => {
   const { notify, confirmAction } = useToast();
   const [templates, setTemplates] = useState<CardTemplateRecord[]>(DEFAULT_CARD_TEMPLATES);
   const [name, setName] = useState('');
-  const [priceInr, setPriceInr] = useState(999);
+  const [priceInr, setPriceInr] = useState(1350);
   const [cardType, setCardType] = useState('Matte PVC NFC');
   const [category, setCategory] = useState('Executive');
   const [description, setDescription] = useState('');
   const [bgColor, setBgColor] = useState('#0B1D3A');
   const [draftFrontBgImage, setDraftFrontBgImage] = useState('');
+  const [draftBackBgImage, setDraftBackBgImage] = useState('');
+  const [newActive, setNewActive] = useState(true);
+  const [newIsDefault, setNewIsDefault] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [modalState, setModalState] = useState<{ template: CardTemplateRecord; isNew: boolean } | null>(null);
 
   const load = () => getCardTemplates(true).then(setTemplates);
   useEffect(() => { load(); }, []);
 
+  const enabledCount = templates.filter((t) => t.active).length;
+  const activeDefaultTpl = templates.find((t) => t.isDefault) || templates.find((t) => t.active) || null;
+
   const buildNewTemplateDraft = (): CardTemplateRecord => {
-    const base = DEFAULT_CARD_TEMPLATES[0];
+    const base = DEFAULT_CARD_TEMPLATES.find((t) => t.templateId === 'premium-navy') || DEFAULT_CARD_TEMPLATES[0];
     return {
       ...JSON.parse(JSON.stringify(base)),
       templateId: `tpl-${Date.now()}`,
@@ -1551,14 +1928,18 @@ export const AdminCardTemplatesPage: React.FC = () => {
       cardType: cardType.trim() || 'Matte PVC NFC',
       category: category.trim() || 'Executive',
       description: description.trim(),
-      active: true,
-      isDefault: false,
+      active: newIsDefault ? true : newActive,
+      isDefault: newIsDefault,
       supportsVertical: true,
       frontSpec: {
         ...JSON.parse(JSON.stringify(base.frontSpec)),
         backgroundColor: bgColor,
         gradientTo: '',
         backgroundImageUrl: draftFrontBgImage || '',
+      },
+      backSpec: {
+        ...JSON.parse(JSON.stringify(base.backSpec)),
+        backgroundImageUrl: draftBackBgImage || '',
       },
     };
   };
@@ -1567,6 +1948,9 @@ export const AdminCardTemplatesPage: React.FC = () => {
     setName('');
     setDescription('');
     setDraftFrontBgImage('');
+    setDraftBackBgImage('');
+    setNewActive(true);
+    setNewIsDefault(false);
   };
 
   const handleQuickAdd = async (e: React.FormEvent) => {
@@ -1576,7 +1960,11 @@ export const AdminCardTemplatesPage: React.FC = () => {
     await saveCardTemplate(tpl, { uid: userRecord.uid, email: userRecord.email, role: userRecord.role });
     resetCreateForm();
     await load();
-    notify('Template added', tpl.name, 'success');
+    notify(
+      tpl.isDefault ? 'Template added & set as default' : 'Template added',
+      tpl.name,
+      'success'
+    );
   };
 
   const handleSaveFromModal = async (cleaned: CardTemplateRecord) => {
@@ -1610,10 +1998,113 @@ export const AdminCardTemplatesPage: React.FC = () => {
     }
   };
 
+  const handleToggleVisible = async (tpl: CardTemplateRecord, nextChecked: boolean) => {
+    if (!userRecord) return;
+    setBusyId(tpl.templateId);
+    try {
+      const nextTpl: CardTemplateRecord = {
+        ...tpl,
+        active: nextChecked,
+        isDefault: !nextChecked && tpl.isDefault ? false : tpl.isDefault,
+      };
+      await saveCardTemplate(nextTpl, { uid: userRecord.uid, email: userRecord.email, role: userRecord.role });
+      await load();
+      notify(
+        nextChecked ? 'Template enabled for users' : 'Template hidden from users',
+        tpl.name,
+        nextChecked ? 'success' : 'info'
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleSetDefault = async (tpl: CardTemplateRecord) => {
+    if (!userRecord) return;
+    setBusyId(tpl.templateId);
+    try {
+      await setDefaultCardTemplate(tpl.templateId, {
+        uid: userRecord.uid,
+        email: userRecord.email,
+        role: userRecord.role,
+      });
+      await load();
+      notify('Default template updated', `${tpl.name} is now the default template for users.`, 'success');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleBulkVisibility = async (enableAll: boolean) => {
+    if (!userRecord) return;
+    setBusyId('__bulk__');
+    try {
+      await setBulkCardTemplatesVisibility(enableAll, {
+        uid: userRecord.uid,
+        email: userRecord.email,
+        role: userRecord.role,
+      });
+      await load();
+      notify(
+        enableAll ? 'All templates enabled' : 'All templates disabled',
+        enableAll
+          ? 'Every template in the catalog is now visible in Customer Design Studio.'
+          : 'Predefined templates are now unchecked. Check only the templates you want users to see.',
+        'info'
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <PortalLayout portal="admin" title="Card Templates Management">
+      <AdminCardsHubTabs />
       <div className="space-y-6">
+        {/* Catalog Visibility & Default Summary Bar */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <CheckSquare className="h-4 w-4 text-[#1D4ED8]" />
+              <h2 className="font-display font-bold text-sm sm:text-base text-[#0B1D3A]">
+                Customer Template Visibility &amp; Default Selection
+              </h2>
+            </div>
+            <p className="text-xs text-slate-600">
+              Check the templates below to make them visible in Customer Design Studio. Only checked templates ({' '}
+              <strong className="text-[#0B1D3A]">
+                {enabledCount} of {templates.length}
+              </strong>{' '}
+              ) are shown to users. Current Default:{' '}
+              <strong className="text-amber-700">{activeDefaultTpl?.name || 'None'}</strong>.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={busyId === '__bulk__'}
+              onClick={() => handleBulkVisibility(true)}
+              className="px-3 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold disabled:opacity-50"
+            >
+              Check All ({templates.length})
+            </button>
+            <button
+              type="button"
+              disabled={busyId === '__bulk__'}
+              onClick={() => handleBulkVisibility(false)}
+              className="px-3 py-1.5 rounded-lg border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold disabled:opacity-50"
+            >
+              Uncheck All
+            </button>
+          </div>
+        </div>
+
+        {/* Add New Template Form */}
         <form onSubmit={handleQuickAdd} className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="font-display font-bold text-sm text-[#0B1D3A]">Add New Card Template</h3>
+            <span className="text-[11px] text-slate-500">Upload custom artwork or design layout &amp; set default</span>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 items-end">
             <div className="lg:col-span-2">
               <label className="block text-[11px] font-medium text-slate-500 mb-1">Template Name *</label>
@@ -1624,7 +2115,7 @@ export const AdminCardTemplatesPage: React.FC = () => {
                 maxLength={100}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Executive Emerald"
+                placeholder="e.g. Healthcare Aqua Pro"
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
               />
             </div>
@@ -1636,7 +2127,7 @@ export const AdminCardTemplatesPage: React.FC = () => {
                 min={0}
                 value={priceInr}
                 onChange={(e) => setPriceInr(Number(e.target.value))}
-                placeholder="999"
+                placeholder="1350"
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
               />
             </div>
@@ -1669,7 +2160,7 @@ export const AdminCardTemplatesPage: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end">
-            <div className="lg:col-span-5">
+            <div className="lg:col-span-4">
               <label className="block text-[11px] font-medium text-slate-500 mb-1">Description</label>
               <input
                 type="text"
@@ -1680,10 +2171,10 @@ export const AdminCardTemplatesPage: React.FC = () => {
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
               />
             </div>
-            <div className="lg:col-span-3 flex flex-wrap items-center gap-2">
+            <div className="lg:col-span-4 flex flex-wrap items-center gap-2">
               <label className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer">
                 <Upload className="h-3.5 w-3.5 text-[#1D4ED8]" />
-                <span>{draftFrontBgImage ? 'Change Design Image' : 'Upload Design / BG'}</span>
+                <span>{draftFrontBgImage ? 'Change Front BG' : 'Front BG Image'}</span>
                 <input
                   type="file"
                   accept="image/*"
@@ -1698,17 +2189,41 @@ export const AdminCardTemplatesPage: React.FC = () => {
                       maxChars: 260_000,
                     });
                     setDraftFrontBgImage(dataUrl);
-                    notify('Design image attached', 'Open "Customize Layout" to adjust text/QR over your image.', 'info');
+                    notify('Front background attached', 'Open "Customize Layout" to adjust text/QR over your image.', 'info');
                   }}
                 />
               </label>
-              {draftFrontBgImage && (
+              <label className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer">
+                <Upload className="h-3.5 w-3.5 text-emerald-700" />
+                <span>{draftBackBgImage ? 'Change Back BG' : 'Back BG Image'}</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = '';
+                    if (!f) return;
+                    const dataUrl = await compressImageFileToDataUrl(f, {
+                      maxWidth: 1082,
+                      maxHeight: 709,
+                      maxChars: 260_000,
+                    });
+                    setDraftBackBgImage(dataUrl);
+                    notify('Back background attached', 'Back artwork added to your new template.', 'info');
+                  }}
+                />
+              </label>
+              {(draftFrontBgImage || draftBackBgImage) && (
                 <button
                   type="button"
-                  onClick={() => setDraftFrontBgImage('')}
+                  onClick={() => {
+                    setDraftFrontBgImage('');
+                    setDraftBackBgImage('');
+                  }}
                   className="text-xs text-rose-600 hover:underline"
                 >
-                  Clear Image
+                  Clear Images
                 </button>
               )}
             </div>
@@ -1726,21 +2241,89 @@ export const AdminCardTemplatesPage: React.FC = () => {
               </button>
             </div>
           </div>
+
+          <div className="flex flex-wrap items-center gap-5 pt-2 border-t border-slate-100">
+            <label className="inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={newIsDefault ? true : newActive}
+                disabled={newIsDefault}
+                onChange={(e) => setNewActive(e.target.checked)}
+                className="h-4 w-4 accent-[#1D4ED8]"
+              />
+              <span>Enable immediately for users</span>
+            </label>
+            <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#0B1D3A] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={newIsDefault}
+                onChange={(e) => {
+                  setNewIsDefault(e.target.checked);
+                  if (e.target.checked) setNewActive(true);
+                }}
+                className="h-4 w-4 accent-amber-600"
+              />
+              <span>Make this the Default Template for users</span>
+            </label>
+          </div>
         </form>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {templates.map((t) => (
-            <div key={t.templateId} className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col justify-between gap-4">
+            <div
+              key={t.templateId}
+              className={`bg-white border rounded-2xl p-4 sm:p-5 flex flex-col justify-between gap-4 transition-colors ${
+                t.isDefault
+                  ? 'border-amber-400 ring-1 ring-amber-200'
+                  : t.active
+                  ? 'border-slate-200'
+                  : 'border-slate-200 bg-slate-50/70 opacity-85'
+              }`}
+            >
               <div className="space-y-3">
+                {/* Top Checkbox + Default Indicator */}
+                <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-100">
+                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-800 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={t.active}
+                      disabled={busyId === t.templateId}
+                      onChange={(e) => handleToggleVisible(t, e.target.checked)}
+                      className="h-4 w-4 accent-[#1D4ED8] rounded"
+                    />
+                    <span>{t.active ? 'Visible to Users' : 'Hidden from Users'}</span>
+                  </label>
+
+                  {t.isDefault ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[11px] font-bold">
+                      <Star className="h-3 w-3 fill-amber-500 text-amber-600" />
+                      <span>Default</span>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={busyId === t.templateId}
+                      onClick={() => handleSetDefault(t)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 hover:border-amber-400 hover:bg-amber-50 text-[11px] font-semibold text-slate-700 hover:text-amber-800 disabled:opacity-50"
+                    >
+                      <Star className="h-3 w-3" />
+                      <span>Set as Default</span>
+                    </button>
+                  )}
+                </div>
+
                 {/* Live Card Miniature Preview */}
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
                   <CardCanvasPreview
                     side={t.frontSpec}
                     orientation="landscape"
                     personalInfo={{
-                      fullName: 'Aarav Mehta',
-                      jobTitle: 'Managing Director',
-                      companyName: 'TapNex Ventures',
+                      fullName: 'Your Name',
+                      jobTitle: 'Your Designation',
+                      companyName: 'Your Company Name',
+                      mobile: 'Your Number',
+                      email: 'Your Email ID',
+                      website: 'Your Website',
                     }}
                   />
                 </div>
@@ -1749,10 +2332,7 @@ export const AdminCardTemplatesPage: React.FC = () => {
                   <div className="min-w-0">
                     <h3 className="font-display font-bold text-sm text-[#0B1D3A] truncate">{t.name}</h3>
                     <p className="text-xs text-slate-500">
-                      {t.cardType} · {t.category || 'Standard'} ·{' '}
-                      <span className={t.active ? 'text-emerald-700 font-semibold' : 'text-amber-700 font-semibold'}>
-                        {t.active ? 'Active' : 'Inactive'}
-                      </span>
+                      {t.cardType} · {t.category || 'Standard'}
                     </p>
                   </div>
                   <span className="font-mono text-xs font-bold text-[#1D4ED8] shrink-0">₹{t.priceInr}</span>
@@ -1788,17 +2368,6 @@ export const AdminCardTemplatesPage: React.FC = () => {
                       }}
                     />
                   </label>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (!userRecord) return;
-                      await saveCardTemplate({ ...t, active: !t.active }, { uid: userRecord.uid, email: userRecord.email, role: userRecord.role });
-                      load();
-                    }}
-                    className="text-xs font-semibold text-[#1D4ED8] hover:underline"
-                  >
-                    {t.active ? 'Deactivate' : 'Activate'}
-                  </button>
                 </div>
 
                 {userRecord?.role === 'SUPERADMIN' && (
@@ -1847,6 +2416,7 @@ export const AdminQrManagementPage: React.FC = () => {
   useEffect(() => { getAllQrCodes().then(setQrs); }, []);
   return (
     <PortalLayout portal="admin" title="QR Code Registry">
+      <AdminOpsHubTabs />
       <div className="space-y-4">
         <div className="flex justify-end">
           <Link to="/superadmin/qr-generator" className="px-4 py-2 bg-[#0B1D3A] text-white text-xs font-semibold rounded-lg">
@@ -1891,6 +2461,7 @@ export const AdminShippingPage: React.FC = () => {
   useEffect(() => { getAllShippingRecords().then(setRecords); }, []);
   return (
     <PortalLayout portal="admin" title="Shipping & Dispatch Tracking">
+      <AdminOrdersHubTabs />
       <div className="bg-white border border-slate-200 rounded-2xl overflow-x-auto">
         <table className="w-full text-left text-xs">
           <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
@@ -1924,6 +2495,7 @@ export const AdminReportsPage: React.FC = () => {
 
   return (
     <PortalLayout portal="admin" title="Reports & Analytics Export">
+      <AdminOpsHubTabs />
       <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-5">
         <h2 className="font-display font-bold text-base text-[#0B1D3A]">Export Platform Reports (CSV / Excel)</h2>
         <div className="flex flex-wrap gap-3">
@@ -1974,9 +2546,18 @@ export const AdminReportsPage: React.FC = () => {
 export const AdminSettingsAndTicketsPage: React.FC = () => {
   const { userRecord } = useAuth();
   const { notify } = useToast();
+  const location = useLocation();
+  const initialSubTab =
+    new URLSearchParams(location.search).get('tab') === 'tickets' ? 'tickets' : 'gateways';
+  const [subTab, setSubTab] = useState<'gateways' | 'tickets'>(initialSubTab);
   const [tickets, setTickets] = useState<SupportTicketRecord[]>([]);
   const [templates, setTemplates] = useState<EmailTemplateRecord[]>([]);
   const [selectedTpl, setSelectedTpl] = useState<EmailTemplateRecord | null>(null);
+
+  useEffect(() => {
+    const param = new URLSearchParams(location.search).get('tab');
+    if (param === 'tickets' || param === 'gateways') setSubTab(param);
+  }, [location.search]);
 
   const load = () => {
     getSupportTickets().then(setTickets);
@@ -1988,80 +2569,112 @@ export const AdminSettingsAndTicketsPage: React.FC = () => {
   useEffect(() => { load(); }, []);
 
   return (
-    <PortalLayout portal="admin" title="Support Tickets & Email Templates">
-      <div className="space-y-6">
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
-          <h2 className="font-display font-bold text-base text-[#0B1D3A]">Customer Support Tickets</h2>
-          {tickets.length === 0 ? (
-            <p className="text-xs text-slate-500">No support tickets logged.</p>
-          ) : (
-            <div className="space-y-3">
-              {tickets.map((t) => (
-                <div key={t.ticketId} className="p-4 border border-slate-200 rounded-xl space-y-2">
-                  <div className="flex justify-between text-xs text-slate-500">
-                    <span>{t.category} · UID: {t.uid.slice(0, 8)}</span>
-                    <span className="font-semibold text-[#1D4ED8]">{t.status}</span>
+    <PortalLayout portal="admin" title="Payment Gateways, Support & Email">
+      <AdminOpsHubTabs />
+
+      <div className="mb-5 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setSubTab('gateways')}
+          className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold border transition-colors ${
+            subTab === 'gateways'
+              ? 'bg-[#1D4ED8] text-white border-[#1D4ED8]'
+              : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+          }`}
+        >
+          <CreditCard className="h-3.5 w-3.5" />
+          <span>Payment Gateways (6 Providers)</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSubTab('tickets')}
+          className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold border transition-colors ${
+            subTab === 'tickets'
+              ? 'bg-[#1D4ED8] text-white border-[#1D4ED8]'
+              : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+          }`}
+        >
+          <span>Support Tickets & Email Templates ({tickets.length})</span>
+        </button>
+      </div>
+
+      {subTab === 'gateways' ? (
+        <PaymentGatewaySettingsPanel />
+      ) : (
+        <div className="space-y-6">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+            <h2 className="font-display font-bold text-base text-[#0B1D3A]">Customer Support Tickets</h2>
+            {tickets.length === 0 ? (
+              <p className="text-xs text-slate-500">No support tickets logged.</p>
+            ) : (
+              <div className="space-y-3">
+                {tickets.map((t) => (
+                  <div key={t.ticketId} className="p-4 border border-slate-200 rounded-xl space-y-2">
+                    <div className="flex justify-between text-xs text-slate-500">
+                      <span>{t.category} · UID: {t.uid.slice(0, 8)}</span>
+                      <span className="font-semibold text-[#1D4ED8]">{t.status}</span>
+                    </div>
+                    <div className="font-semibold text-sm text-[#0B1D3A]">{t.subject}</div>
+                    <p className="text-xs text-slate-600">{t.message}</p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await updateSupportTicket(t.ticketId, { status: 'Resolved', adminReply: 'Reviewed and resolved by support team.' });
+                          notify('Ticket resolved', t.subject, 'success');
+                          load();
+                        }}
+                        className="px-3 py-1.5 bg-[#0B1D3A] text-white text-xs font-semibold rounded-lg"
+                      >
+                        Mark Resolved
+                      </button>
+                    </div>
                   </div>
-                  <div className="font-semibold text-sm text-[#0B1D3A]">{t.subject}</div>
-                  <p className="text-xs text-slate-600">{t.message}</p>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        await updateSupportTicket(t.ticketId, { status: 'Resolved', adminReply: 'Reviewed and resolved by support team.' });
-                        notify('Ticket resolved', t.subject, 'success');
-                        load();
-                      }}
-                      className="px-3 py-1.5 bg-[#0B1D3A] text-white text-xs font-semibold rounded-lg"
-                    >
-                      Mark Resolved
-                    </button>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
+            )}
+          </div>
+
+          {selectedTpl && (
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+              <h2 className="font-display font-bold text-base text-[#0B1D3A]">Transactional Email Templates</h2>
+              <select
+                value={selectedTpl.templateId}
+                onChange={(e) => setSelectedTpl(templates.find((t) => t.templateId === e.target.value) || null)}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+              >
+                {templates.map((t) => (
+                  <option key={t.templateId} value={t.templateId}>{t.name}</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                value={selectedTpl.subject}
+                onChange={(e) => setSelectedTpl({ ...selectedTpl, subject: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+              />
+              <textarea
+                rows={6}
+                value={selectedTpl.htmlBody}
+                onChange={(e) => setSelectedTpl({ ...selectedTpl, htmlBody: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
+              />
+              {userRecord?.role === 'SUPERADMIN' && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await saveEmailTemplate(selectedTpl, { uid: userRecord.uid, email: userRecord.email, role: userRecord.role });
+                    notify('Email template saved', selectedTpl.name, 'success');
+                  }}
+                  className="px-4 py-2 bg-[#0B1D3A] text-white text-xs font-semibold rounded-lg"
+                >
+                  Save Email Template
+                </button>
+              )}
             </div>
           )}
         </div>
-
-        {selectedTpl && (
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
-            <h2 className="font-display font-bold text-base text-[#0B1D3A]">Transactional Email Templates</h2>
-            <select
-              value={selectedTpl.templateId}
-              onChange={(e) => setSelectedTpl(templates.find((t) => t.templateId === e.target.value) || null)}
-              className="px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
-            >
-              {templates.map((t) => (
-                <option key={t.templateId} value={t.templateId}>{t.name}</option>
-              ))}
-            </select>
-            <input
-              type="text"
-              value={selectedTpl.subject}
-              onChange={(e) => setSelectedTpl({ ...selectedTpl, subject: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
-            />
-            <textarea
-              rows={6}
-              value={selectedTpl.htmlBody}
-              onChange={(e) => setSelectedTpl({ ...selectedTpl, htmlBody: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
-            />
-            {userRecord?.role === 'SUPERADMIN' && (
-              <button
-                type="button"
-                onClick={async () => {
-                  await saveEmailTemplate(selectedTpl, { uid: userRecord.uid, email: userRecord.email, role: userRecord.role });
-                  notify('Email template saved', selectedTpl.name, 'success');
-                }}
-                className="px-4 py-2 bg-[#0B1D3A] text-white text-xs font-semibold rounded-lg"
-              >
-                Save Email Template
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+      )}
     </PortalLayout>
   );
 };
@@ -2163,6 +2776,7 @@ export const AdminAuditLogsPage: React.FC = () => {
 
   return (
     <PortalLayout portal="admin" title="Security & Administrative Audit Logs">
+      <AdminOpsHubTabs />
       <div className="space-y-5">
         <form onSubmit={handleApplySubmit} className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2368,8 +2982,9 @@ export const AdminProfilesPage: React.FC = () => {
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [search, setSearch] = useState('');
-  const [stateFilter, setStateFilter] = useState<'ALL' | 'ACTIVE' | 'DISABLED'>('ALL');
+  const [stateFilter, setStateFilter] = useState<'ALL' | 'ACTIVE' | 'DISABLED' | 'APPROVED'>('ALL');
   const [loading, setLoading] = useState(true);
+  const [inspectedProfile, setInspectedProfile] = useState<ProfileRecord | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -2404,12 +3019,46 @@ export const AdminProfilesPage: React.FC = () => {
     const matchState =
       stateFilter === 'ALL' ||
       (stateFilter === 'ACTIVE' && p.isPublic) ||
-      (stateFilter === 'DISABLED' && !p.isPublic);
+      (stateFilter === 'DISABLED' && !p.isPublic) ||
+      (stateFilter === 'APPROVED' && Boolean(p.adminApproved));
     return matchText && matchState;
   });
 
+  const handleToggleApproval = async (p: ProfileRecord) => {
+    if (!userRecord) return;
+    const updated = await adminSetProfileApproval({
+      profile: p,
+      approved: !p.adminApproved,
+      actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+      inactiveMessage: appSettings.inactiveProfileMessage,
+    });
+    notify(
+      updated.adminApproved ? 'Profile link approved (payment optional)' : 'Manual approval revoked',
+      `/p/${p.slug}`,
+      'success'
+    );
+    setInspectedProfile((curr) => (curr?.profileId === p.profileId ? updated : curr));
+    load();
+  };
+
+  const handleToggleActive = async (p: ProfileRecord) => {
+    if (!userRecord) return;
+    await adminToggleProfileStatus({
+      profile: p,
+      isPublic: !p.isPublic,
+      actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
+      inactiveMessage: appSettings.inactiveProfileMessage,
+    });
+    notify(p.isPublic ? 'Profile disabled' : 'Profile enabled', `/p/${p.slug}`, 'success');
+    setInspectedProfile((curr) =>
+      curr?.profileId === p.profileId ? { ...p, isPublic: !p.isPublic } : curr
+    );
+    load();
+  };
+
   return (
     <PortalLayout portal="admin" title="Digital Profiles Control">
+      <AdminUsersHubTabs />
       <div className="space-y-5">
         <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-wrap gap-3 items-center justify-between">
           <div className="flex flex-wrap gap-2.5 flex-1">
@@ -2425,11 +3074,12 @@ export const AdminProfilesPage: React.FC = () => {
             </div>
             <select
               value={stateFilter}
-              onChange={(e) => setStateFilter(e.target.value as 'ALL' | 'ACTIVE' | 'DISABLED')}
+              onChange={(e) => setStateFilter(e.target.value as 'ALL' | 'ACTIVE' | 'DISABLED' | 'APPROVED')}
               className="px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
             >
               <option value="ALL">All Statuses</option>
               <option value="ACTIVE">Enabled / Public</option>
+              <option value="APPROVED">Admin Approved (No Payment)</option>
               <option value="DISABLED">Disabled</option>
             </select>
           </div>
@@ -2444,7 +3094,7 @@ export const AdminProfilesPage: React.FC = () => {
               <tr>
                 <th className="py-3 px-4">Profile / Owner</th>
                 <th className="py-3 px-4">Public Slug</th>
-                <th className="py-3 px-4">Payment</th>
+                <th className="py-3 px-4">Payment / Link Unlock</th>
                 <th className="py-3 px-4">Status</th>
                 <th className="py-3 px-4 text-right">Actions</th>
               </tr>
@@ -2483,31 +3133,46 @@ export const AdminProfilesPage: React.FC = () => {
                           <ExternalLink className="h-3 w-3" />
                         </a>
                       </td>
-                      <td className="py-3 px-4">
-                        <span className={`font-semibold ${paid ? 'text-emerald-700' : 'text-amber-700'}`}>
-                          {paid ? 'Confirmed' : 'Unpaid'}
-                        </span>
+                      <td className="py-3 px-4 space-y-1">
+                        <div className={`font-semibold ${paid ? 'text-emerald-700' : 'text-amber-700'}`}>
+                          {paid ? 'Payment: Confirmed' : 'Payment: Pending'}
+                        </div>
+                        {p.adminApproved && (
+                          <div className="inline-block px-2 py-0.5 rounded bg-blue-50 text-[#1D4ED8] border border-blue-200 text-[10px] font-semibold">
+                            Admin Approved
+                          </div>
+                        )}
                       </td>
                       <td className="py-3 px-4">
                         <span className={`font-semibold ${p.isPublic ? 'text-emerald-700' : 'text-rose-700'}`}>
                           {p.isPublic ? 'Enabled' : 'Disabled'}
                         </span>
                       </td>
-                      <td className="py-3 px-4 text-right space-x-2 whitespace-nowrap">
+                      <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
                         <button
                           type="button"
-                          onClick={async () => {
-                            if (!userRecord) return;
-                            await adminToggleProfileStatus({
-                              profile: p,
-                              isPublic: !p.isPublic,
-                              actor: { uid: userRecord.uid, email: userRecord.email, role: userRecord.role },
-                              inactiveMessage: appSettings.inactiveProfileMessage,
-                            });
-                            notify(p.isPublic ? 'Profile disabled' : 'Profile enabled', `/p/${p.slug}`, 'success');
-                            load();
-                          }}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold hover:bg-slate-50"
+                          onClick={() => setInspectedProfile(p)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-[#1D4ED8]/30 bg-blue-50/70 text-[#1D4ED8] rounded-lg text-xs font-semibold hover:bg-blue-100"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          <span>Inspect Profile</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleApproval(p)}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold ${
+                            p.adminApproved
+                              ? 'border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                              : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          }`}
+                        >
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                          <span>{p.adminApproved ? 'Revoke Approval' : 'Approve Link'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleActive(p)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold hover:bg-slate-50"
                         >
                           <Power className="h-3.5 w-3.5" />
                           <span>{p.isPublic ? 'Disable' : 'Enable'}</span>
@@ -2530,7 +3195,7 @@ export const AdminProfilesPage: React.FC = () => {
                             notify('Digital profile deleted', `/p/${p.slug}`, 'success');
                             load();
                           }}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 border border-rose-200 text-rose-600 rounded-lg text-xs font-semibold hover:bg-rose-50"
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-rose-200 text-rose-600 rounded-lg text-xs font-semibold hover:bg-rose-50"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                           <span>Delete</span>
@@ -2544,6 +3209,21 @@ export const AdminProfilesPage: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {inspectedProfile && (
+        <AdminProfileInspectorModal
+          profile={inspectedProfile}
+          owner={userMap.get(inspectedProfile.uid) || null}
+          paid={orders.some(
+            (o) =>
+              o.profileId === inspectedProfile.profileId &&
+              (o.paymentStatus === 'Verified' || o.paymentStatus === 'Completed')
+          )}
+          onClose={() => setInspectedProfile(null)}
+          onToggleApproval={handleToggleApproval}
+          onToggleActive={handleToggleActive}
+        />
+      )}
     </PortalLayout>
   );
 };
@@ -2798,6 +3478,7 @@ export const AdminApprovedDesignsPage: React.FC = () => {
 
   return (
     <PortalLayout portal="admin" title="Approved Designs & Direct Print">
+      <AdminCardsHubTabs />
       <div className="space-y-5">
         <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
           <div className="relative flex-1 min-w-[220px]">

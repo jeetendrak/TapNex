@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { PublicLayout } from '../../components/PublicLayout';
 import { CardCanvasPreview } from '../../components/CardCanvasPreview';
-import { DEFAULT_CARD_TEMPLATES } from '../../lib/constants';
+import { BLANK_CARD_TEMPLATE, DEFAULT_CARD_TEMPLATES } from '../../lib/constants';
 import { getCardTemplates } from '../../lib/firestoreService';
 import type { CardTemplateRecord } from '../../types';
 
@@ -23,12 +23,12 @@ const SHOWCASE_IMG = '/src/assets/images/card_showcase_navy_1794820572938.jpg';
 const WORKFLOW_IMG = '/src/assets/images/nfc_workflow_office_1794820571142.jpg';
 
 const SAMPLE_PERSON = {
-  fullName: 'Aarav Mehta',
-  jobTitle: 'Managing Director',
-  companyName: 'Meridian Advisory',
-  mobile: '+91 98201 44510',
-  email: 'aarav@meridianadvisory.in',
-  website: 'meridianadvisory.in',
+  fullName: 'Your Name',
+  jobTitle: 'Your Designation',
+  companyName: 'Your Company Name',
+  mobile: 'Your Number',
+  email: 'Your Email ID',
+  website: 'Your Website',
 };
 
 const HOW_IT_WORKS_STEPS = [
@@ -94,15 +94,21 @@ const FAQS = [
 ];
 
 export const HomePage: React.FC = () => {
-  const [templates, setTemplates] = useState<CardTemplateRecord[]>(DEFAULT_CARD_TEMPLATES);
-  const [selectedTpl, setSelectedTpl] = useState<CardTemplateRecord>(DEFAULT_CARD_TEMPLATES[0]);
+  const initialDefault =
+    DEFAULT_CARD_TEMPLATES.find((t) => t.isDefault) || DEFAULT_CARD_TEMPLATES[0];
+  const [templates, setTemplates] = useState<CardTemplateRecord[]>(
+    DEFAULT_CARD_TEMPLATES.filter((t) => t.active)
+  );
+  const [selectedTpl, setSelectedTpl] = useState<CardTemplateRecord>(initialDefault);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
 
   useEffect(() => {
     getCardTemplates().then((list) => {
+      setTemplates(list);
       if (list.length > 0) {
-        setTemplates(list);
-        setSelectedTpl(list[0]);
+        setSelectedTpl(list.find((t) => t.isDefault) || list[0]);
+      } else {
+        setSelectedTpl(BLANK_CARD_TEMPLATE);
       }
     });
   }, []);
@@ -150,12 +156,12 @@ export const HomePage: React.FC = () => {
           </div>
 
           <div className="lg:col-span-6">
-            <div className="relative h-full min-h-[300px] lg:min-h-[420px] rounded-2xl overflow-hidden border border-slate-200 bg-slate-100">
+            <div className="group relative h-full min-h-[300px] lg:min-h-[420px] rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 shadow-sm hover:shadow-xl hover:border-blue-300/80 transition-all duration-500">
               <img
                 src={HERO_IMG}
                 alt="Matte deep navy NFC smart business card tapped against a smartphone"
                 referrerPolicy="no-referrer"
-                className="w-full h-full object-cover"
+                className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
               />
             </div>
           </div>
@@ -271,12 +277,12 @@ export const HomePage: React.FC = () => {
                   Keep alternate phone numbers or internal emails private while exposing GST numbers, booking links, or office numbers selectively.
                 </p>
               </div>
-              <div className="rounded-xl overflow-hidden border border-slate-200 aspect-[4/3] bg-slate-100">
+              <div className="group rounded-xl overflow-hidden border border-slate-200 aspect-[4/3] bg-slate-100 shadow-xs hover:shadow-lg hover:border-blue-300/80 transition-all duration-500">
                 <img
                   src={WORKFLOW_IMG}
                   alt="Professionals exchanging digital business profile with NFC card"
                   referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
                 />
               </div>
             </div>
@@ -337,7 +343,7 @@ export const HomePage: React.FC = () => {
                   <span className="font-mono tabular-nums">85.6 × 54.0 mm</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-center">
-                  <div>
+                  <div className="transition-transform duration-300 ease-out hover:-translate-y-1">
                     <div className="text-xs font-medium text-slate-500 mb-2">Front Side</div>
                     <CardCanvasPreview
                       side={selectedTpl.frontSpec}
@@ -345,7 +351,7 @@ export const HomePage: React.FC = () => {
                       personalInfo={SAMPLE_PERSON}
                     />
                   </div>
-                  <div>
+                  <div className="transition-transform duration-300 ease-out hover:-translate-y-1">
                     <div className="text-xs font-medium text-slate-500 mb-2">Back Side (QR Placeholder)</div>
                     <CardCanvasPreview
                       side={selectedTpl.backSpec}
@@ -356,12 +362,12 @@ export const HomePage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="rounded-2xl overflow-hidden border border-slate-200 aspect-[16/7] bg-slate-100">
+              <div className="group rounded-2xl overflow-hidden border border-slate-200 aspect-[16/7] bg-slate-100 shadow-xs hover:shadow-xl hover:border-blue-300/80 transition-all duration-500">
                 <img
                   src={SHOWCASE_IMG}
                   alt="Luxury matte navy, obsidian black, and pearl white NFC business cards"
                   referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"
                 />
               </div>
             </div>
@@ -414,7 +420,7 @@ export const HomePage: React.FC = () => {
             <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-7 flex flex-col justify-between">
               <div>
                 <div className="text-sm font-semibold text-cyan-400">PVC Matte / Gloss NFC</div>
-                <div className="mt-2 font-display text-3xl font-bold tabular-nums">₹899 – ₹1,199</div>
+                <div className="mt-2 font-display text-3xl font-bold tabular-nums">₹1,200 – ₹1,500</div>
                 <p className="mt-2 text-xs text-slate-400">Ideal for founders, consultants, and sales teams</p>
                 <ul className="mt-5 space-y-2.5 text-sm text-slate-300">
                   <li className="flex items-center gap-2"><Check className="h-4 w-4 text-cyan-400" /><span>85.6 × 54 mm ISO ID-1 precision trim</span></li>
@@ -433,7 +439,7 @@ export const HomePage: React.FC = () => {
             <div className="bg-slate-900/90 border border-blue-500/40 rounded-2xl p-7 flex flex-col justify-between">
               <div>
                 <div className="text-sm font-semibold text-cyan-400">Metal Hybrid Executive NFC</div>
-                <div className="mt-2 font-display text-3xl font-bold tabular-nums">₹1,799</div>
+                <div className="mt-2 font-display text-3xl font-bold tabular-nums">₹2,000 – ₹2,500</div>
                 <p className="mt-2 text-xs text-slate-400">Brushed dark metal finish for executive presence</p>
                 <ul className="mt-5 space-y-2.5 text-sm text-slate-300">
                   <li className="flex items-center gap-2"><Check className="h-4 w-4 text-cyan-400" /><span>Custom front/back artwork at 300 DPI</span></li>

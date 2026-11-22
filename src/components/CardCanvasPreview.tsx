@@ -1,13 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Wifi } from 'lucide-react';
+import { User, Wifi } from 'lucide-react';
 import { resolveCardTokens } from '../lib/printPdf';
 import type { CardSideDesign, PersonalInformation } from '../types';
 
 export type CardCanvasTarget =
   | { kind: 'text'; id: string }
+  | { kind: 'shape'; id: string }
   | { kind: 'logo' }
   | { kind: 'avatar' }
-  | { kind: 'qr' };
+  | { kind: 'qr' }
+  | { kind: 'nfc' };
 
 interface CardCanvasPreviewProps {
   side: CardSideDesign;
@@ -103,8 +105,10 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
       if (!box || box.width <= 0 || box.height <= 0) return;
       const dxPct = ((e.clientX - dragging.startX) / box.width) * 100;
       const dyPct = ((e.clientY - dragging.startY) / box.height) * 100;
-      const nextX = Math.max(2, Math.min(88, Math.round(dragging.origXPct + dxPct)));
-      const nextY = Math.max(2, Math.min(88, Math.round(dragging.origYPct + dyPct)));
+      const minBound = dragging.target.kind === 'shape' ? -25 : 2;
+      const maxBound = dragging.target.kind === 'shape' ? 95 : 88;
+      const nextX = Math.max(minBound, Math.min(maxBound, Math.round(dragging.origXPct + dxPct)));
+      const nextY = Math.max(minBound, Math.min(maxBound, Math.round(dragging.origYPct + dyPct)));
       if (!dragging.moved) {
         setDragging((prev) => (prev ? { ...prev, moved: true } : null));
       }
@@ -161,6 +165,7 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
     if (selectedTarget) {
       if (t.kind !== selectedTarget.kind) return false;
       if (t.kind === 'text' && selectedTarget.kind === 'text') return t.id === selectedTarget.id;
+      if (t.kind === 'shape' && selectedTarget.kind === 'shape') return t.id === selectedTarget.id;
       return true;
     }
     return t.kind === 'text' && selectedElementId === t.id;
@@ -206,6 +211,47 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
           </>
         )}
 
+        {/* Editable Shape / Accent / Divider Layers (Freely Selectable & Draggable in Studio) */}
+        {(side.shapes || []).map((shp) => {
+          const isSelected = isTargetSelected({ kind: 'shape', id: shp.id });
+          const shapeBg: React.CSSProperties =
+            shp.color === 'transparent'
+              ? { backgroundColor: 'transparent' }
+              : shp.gradientTo
+              ? { background: `linear-gradient(135deg, ${shp.color}, ${shp.gradientTo})` }
+              : { backgroundColor: shp.color };
+          const radius =
+            shp.kind === 'circle' || shp.kind === 'pill'
+              ? '9999px'
+              : shp.borderRadiusPx !== undefined
+              ? `${shp.borderRadiusPx}px`
+              : '0px';
+
+          return (
+            <button
+              key={shp.id}
+              type="button"
+              onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => startDrag(e, { kind: 'shape', id: shp.id }, shp.xPct, shp.yPct)}
+              style={{
+                left: `${shp.xPct}%`,
+                top: `${shp.yPct}%`,
+                width: `${shp.widthPct}%`,
+                height: `${Math.max(0.8, shp.heightPct)}%`,
+                borderRadius: radius,
+                opacity: shp.opacity ?? 1,
+                border: shp.borderWidthPx ? `${shp.borderWidthPx}px solid ${shp.borderColor || '#FFFFFF'}` : undefined,
+                transform: shp.rotationDeg ? `rotate(${shp.rotationDeg}deg)` : undefined,
+                ...shapeBg,
+              }}
+              className={`absolute transition-shadow ${
+                interactive ? 'cursor-move touch-none hover:ring-1 hover:ring-cyan-400' : 'pointer-events-none'
+              } ${isSelected ? 'ring-2 ring-cyan-400' : ''}`}
+              title={interactive ? 'Click to edit shape · Drag to move' : undefined}
+            />
+          );
+        })}
+
         {/* Company Logo (Freely Draggable in Studio) */}
         {side.logoDataUrl && (
           <button
@@ -231,41 +277,82 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
           </button>
         )}
 
-        {/* Profile Photo / Avatar (Freely Draggable in Studio) */}
-        {side.showAvatar && side.avatarDataUrl && (
+        {/* Profile Photo / Avatar (Freely Draggable in Studio, supports Circle / Rounded / Square) */}
+        {side.showAvatar && (() => {
+          const resolvedPhoto = side.avatarDataUrl || personalInfo.photoDataUrl;
+          const shapeClass =
+            side.avatarShape === 'rounded'
+              ? 'rounded-2xl'
+              : side.avatarShape === 'square'
+              ? 'rounded-md'
+              : 'rounded-full';
+          return (
+            <button
+              type="button"
+              onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => startDrag(e, { kind: 'avatar' }, side.avatarX, side.avatarY)}
+              style={{
+                left: `${side.avatarX}%`,
+                top: `${side.avatarY}%`,
+                width: `${Math.max(10, Math.min(34, (side.avatarSizeMm || 13) * 1.15))}%`,
+                aspectRatio: '1 / 1',
+              }}
+              className={`absolute ${shapeClass} overflow-hidden border-2 border-white/80 shadow-xs flex items-center justify-center bg-slate-200 ${
+                interactive ? 'cursor-move touch-none hover:ring-2 hover:ring-cyan-400' : 'cursor-default pointer-events-none'
+              } ${isTargetSelected({ kind: 'avatar' }) ? 'ring-2 ring-cyan-400' : ''}`}
+              title={interactive ? 'Drag to move Photo · Click to upload/crop/resize' : undefined}
+            >
+              {resolvedPhoto ? (
+                <img
+                  src={resolvedPhoto}
+                  alt="Profile avatar"
+                  draggable={false}
+                  className="w-full h-full object-cover pointer-events-none"
+                />
+              ) : (
+                <div className="w-full h-full bg-gradient-to-br from-slate-200 to-slate-300 text-slate-500 flex flex-col items-center justify-center gap-0.5 pointer-events-none">
+                  <User className="w-1/2 h-1/2 opacity-70" />
+                  <span
+                    className="font-semibold uppercase tracking-wider leading-none opacity-80"
+                    style={{ fontSize: `${(7.5 / studioBasePx) * 100}cqw` }}
+                  >
+                    Photo
+                  </span>
+                </div>
+              )}
+            </button>
+          );
+        })()}
+
+        {/* NFC Contactless Symbol (Freely Draggable & Resizable in Studio) */}
+        {side.showNfcIcon && (
           <button
             type="button"
             onClick={(e) => e.stopPropagation()}
-            onPointerDown={(e) => startDrag(e, { kind: 'avatar' }, side.avatarX, side.avatarY)}
+            onPointerDown={(e) =>
+              startDrag(e, { kind: 'nfc' }, side.nfcX ?? 88, side.nfcY ?? 10)
+            }
             style={{
-              left: `${side.avatarX}%`,
-              top: `${side.avatarY}%`,
-              width: `${Math.max(10, Math.min(28, (side.avatarSizeMm || 13) * 1.15))}%`,
-              aspectRatio: '1 / 1',
+              left: `${side.nfcX ?? 88}%`,
+              top: `${side.nfcY ?? 10}%`,
+              color: side.nfcIconColor || '#38BDF8',
             }}
-            className={`absolute rounded-full overflow-hidden border border-white/70 shadow-xs ${
-              interactive ? 'cursor-move touch-none hover:ring-2 hover:ring-cyan-400' : 'cursor-default pointer-events-none'
-            } ${isTargetSelected({ kind: 'avatar' }) ? 'ring-2 ring-cyan-400' : ''}`}
-            title={interactive ? 'Drag to move Profile Photo' : undefined}
+            className={`absolute p-1 rounded rotate-90 transition-shadow ${
+              interactive
+                ? 'cursor-move touch-none hover:ring-1 hover:ring-cyan-400'
+                : 'pointer-events-none'
+            } ${isTargetSelected({ kind: 'nfc' }) ? 'ring-2 ring-cyan-400 bg-slate-900/20' : ''}`}
+            aria-label="NFC enabled card"
+            title={interactive ? 'Drag to move NFC icon' : undefined}
           >
-            <img
-              src={side.avatarDataUrl}
-              alt="Profile avatar"
-              draggable={false}
-              className="w-full h-full object-cover pointer-events-none"
+            <Wifi
+              className="pointer-events-none"
+              style={{
+                width: `${(((side.nfcSizeMm || 6) * 3.2) / studioBasePx) * 100}cqw`,
+                height: `${(((side.nfcSizeMm || 6) * 3.2) / studioBasePx) * 100}cqw`,
+              }}
             />
           </button>
-        )}
-
-        {/* NFC Contactless Symbol */}
-        {side.showNfcIcon && (
-          <div
-            className="pointer-events-none absolute top-[10%] right-[6%] rotate-90"
-            style={{ color: side.nfcIconColor || '#38BDF8' }}
-            aria-label="NFC enabled card"
-          >
-            <Wifi style={{ width: `${(20 / studioBasePx) * 100}cqw`, height: `${(20 / studioBasePx) * 100}cqw` }} />
-          </div>
         )}
 
         {/* Editable Text Elements (Freely Draggable + Double-Click Inline Edit + Bold/Italic/Underline) */}
@@ -341,6 +428,7 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
               style={{
                 left: `${el.xPct}%`,
                 top: `${el.yPct}%`,
+                maxWidth: `${Math.max(15, Math.min(95, el.maxWidthPct || 82))}%`,
                 color: el.color,
                 fontFamily: el.fontFamily,
                 fontWeight: el.fontWeight === 'bold' ? 700 : 400,
@@ -349,7 +437,7 @@ export const CardCanvasPreview: React.FC<CardCanvasPreviewProps> = ({
                 fontSize: `${fontCqw}cqw`,
                 textAlign: el.align,
               }}
-              className={`absolute max-w-[82%] truncate leading-tight transition-shadow ${
+              className={`absolute truncate leading-tight transition-shadow ${
                 interactive || onSelectElement || onSelectTarget
                   ? 'cursor-move touch-none hover:ring-1 hover:ring-cyan-400 rounded px-0.5'
                   : 'cursor-default'

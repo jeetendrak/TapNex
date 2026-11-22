@@ -47,14 +47,16 @@ export const PublicProfilePage: React.FC = () => {
       setLoading(true);
       try {
         const [data, settings] = await Promise.all([
-          slug ? getPublicProfileBySlug(slug) : Promise.resolve(null),
-          getAppSettings(),
+          slug ? getPublicProfileBySlug(slug).catch(() => null) : Promise.resolve(null),
+          getAppSettings().catch(() => null),
         ]);
         if (!active) return;
         setProfile(data);
         if (settings?.inactiveProfileMessage) {
           setInactiveFallback(settings.inactiveProfileMessage);
         }
+      } catch {
+        if (active) setProfile(null);
       } finally {
         if (active) setLoading(false);
       }
@@ -89,7 +91,12 @@ export const PublicProfilePage: React.FC = () => {
   }, [profile, userRecord]);
 
   const isPrivilegedViewer = userRecord?.role === 'ADMIN' || userRecord?.role === 'SUPERADMIN';
-  const isPaidLive = Boolean(profile?.paymentConfirmed || ownerPaidConfirmed || isPrivilegedViewer);
+  const isPaidLive = Boolean(
+    profile?.paymentConfirmed ||
+      profile?.adminApproved ||
+      ownerPaidConfirmed ||
+      isPrivilegedViewer
+  );
 
   const handleCopyUrl = async () => {
     if (!isPaidLive) return;
@@ -219,7 +226,7 @@ export const PublicProfilePage: React.FC = () => {
             <div className="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
               <Lock className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
               <span>
-                <strong>Watermarked Preview:</strong> Phone numbers, email IDs, and direct contact actions stay masked until card payment is confirmed.
+                <strong>Watermarked Preview:</strong> Phone numbers, email IDs, and direct contact actions stay masked until card payment or Admin approval is confirmed.
               </span>
             </div>
           )}

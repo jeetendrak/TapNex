@@ -3,15 +3,24 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import {
+  BLANK_CARD_TEMPLATE,
+  createBlankSideDesign,
+  DEFAULT_CARD_TEMPLATES,
+  DEFAULT_VISIBILITY,
+  PAYMENT_GATEWAY_ORDER,
+} from '../src/lib/constants';
+import {
   buildSanitizedPublicProfile,
   calculateProfileCompletion,
   filterAuditLogs,
   isOrderPaymentConfirmed,
   maskEmail,
   maskPhone,
+  mergePaymentGateways,
   RESETTABLE_OPERATIONAL_COLLECTIONS,
   resetApplicationToFreshBlank,
   sanitizeSlug,
+  sortCardTemplates,
 } from '../src/lib/firestoreService';
 import { resolveEffectiveCardDesign } from '../src/lib/studioDraft';
 import { buildPublicVCard } from '../src/lib/vcard';
@@ -21,7 +30,6 @@ import {
   mmToPx300Dpi,
   resolveCardTokens,
 } from '../src/lib/printPdf';
-import { DEFAULT_CARD_TEMPLATES, DEFAULT_VISIBILITY } from '../src/lib/constants';
 import { generateHighResQrArtwork, generatePrinterAuthId } from '../src/lib/qrArtwork';
 import { ROLE_CAPABILITY_MATRIX, ROLE_GUIDES } from '../src/data/guideContent';
 import type { AuditLogRecord, CardDesignRecord, ProfileRecord } from '../src/types';
@@ -218,6 +226,12 @@ describe('Slug Sanitization & Print-Ready 300 DPI Geometry', () => {
     expect(extended).toBe(
       'Architecture | +91 98201 44510 | +91 99999 11111 | desk@vastu.in | Pune, Maharashtra | FC Road, 12, Pune, Maharashtra | Kothrud, Pune | Sustainable spatial studio.'
     );
+
+    const genericFallbacks = resolveCardTokens(
+      '{{FULL_NAME}} | {{MOBILE}} | {{EMAIL}} | {{WEBSITE}}',
+      {}
+    );
+    expect(genericFallbacks).toBe('Your Name | Your Number | Your Email ID | Your Website');
   });
 });
 
@@ -557,6 +571,160 @@ describe('Platform Complete User Role Guide Coverage', () => {
   });
 });
 
+describe('Outer Google Sign-In Concurrency & Rule Safeguards', () => {
+  it('enforces deduplicated user sync and non-blocking profile creation in AuthContext', () => {
+    const authSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/contexts/AuthContext.tsx'), 'utf8');
+    expect(authSrc).toContain('inflightSyncRef');
+    expect(authSrc).toContain('ensureDefaultProfile(newUser).catch');
+    expect(authSrc).toContain('fbUser.photoURL.length <= 2048');
+  });
 
+  it('permits regular and pre-registered Google users to create users/{uid} safely in firestore.rules', () => {
+    const rules = fs.readFileSync(path.resolve(process.cwd(), 'firestore.rules'), 'utf8');
+    expect(rules).toContain("incoming().role == 'USER' && incoming().status in ['Pending Verification', 'Active']");
+    expect(rules).toContain("incoming().role == get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role");
+  });
 
+  it('clamps fallback profile slugs within Firestore 64-char limit', () => {
+    const longName = 'A'.repeat(100);
+    const cleaned = sanitizeSlug(longName);
+    expect(cleaned.length).toBeLessThanOrEqual(60);
+    const suffixed = `${cleaned.slice(0, 54).replace(/-+$/, '')}-ab12`;
+    expect(suffixed.length).toBeLessThanOrEqual(64);
+  });
+});
+
+describe('Multi-Gateway Payments, Blank Template Studio & Admin Profile Approval', () => {
+  it('merges partial payment gateway settings safely across all 6 gateways without storing secrets', () => {
+    const merged = mergePaymentGateways({
+      razorpay: {
+        id: 'razorpay',
+        label: 'Razorpay',
+        enabled: false,
+        mode: 'live',
+        publicKeyId: 'rzp_live_123',
+      },
+      gpay: {
+        id: 'gpay',
+        label: 'Google Pay (GPay)',
+        enabled: true,
+        mode: 'live',
+        upiId: 'business@okaxis',
+      },
+    });
+
+    expect(Object.keys(merged)).toEqual(PAYMENT_GATEWAY_ORDER);
+    expect(merged.razorpay.enabled).toBe(false);
+    expect(merged.razorpay.mode).toBe('live');
+    expect(merged.razorpay.publicKeyId).toBe('rzp_live_123');
+    expect(merged.cashfree.enabled).toBe(true);
+    expect(merged.easebuzz.mode).toBe('sandbox');
+    expect(merged.gpay.upiId).toBe('business@okaxis');
+  });
+
+  it('constructs BLANK_CARD_TEMPLATE with customizable front/back NFC slot and maxWidthPct elements', () => {
+    expect(BLANK_CARD_TEMPLATE.templateId).toBe('blank-custom');
+    const blankFront = createBlankSideDesign('front', 'data:image/png;base64,abc');
+    expect(blankFront.backgroundImageUrl).toBe('data:image/png;base64,abc');
+    expect(typeof blankFront.nfcX).toBe('number');
+    expect(typeof blankFront.nfcY).toBe('number');
+    expect(typeof blankFront.nfcSizeMm).toBe('number');
+    expect(blankFront.elements.every((el) => typeof el.maxWidthPct === 'number')).toBe(true);
+  });
+
+  it('preserves adminApproved metadata on buildSanitizedPublicProfile and enforces anti-spoof rules in firestore.rules', () => {
+    const approvedProfile = makeSampleProfile({
+      adminApproved: true,
+      adminApprovedAt: '2026-11-21T10:00:00.000Z',
+      adminApprovedBy: 'admin_uid_1',
+    });
+    const pub = buildSanitizedPublicProfile(approvedProfile);
+    expect(pub.adminApproved).toBe(true);
+    expect(pub.adminApprovedBy).toBe('admin_uid_1');
+
+    const rules = fs.readFileSync(path.resolve(process.cwd(), 'firestore.rules'), 'utf8');
+    expect(rules).toContain("'cashfree_live', 'cashfree_sandbox'");
+    expect(rules).toContain("'easebuzz_live', 'easebuzz_sandbox'");
+    expect(rules).toContain("'payu_live', 'payu_sandbox'");
+    expect(rules).toContain("'gpay_live', 'gpay_sandbox'");
+    expect(rules).toContain("'upi_live', 'upi_sandbox'");
+    expect(rules).toContain("incoming().get('adminApproved', false) == false");
+    expect(rules).toContain("incoming().get('adminApproved', false) == existing().get('adminApproved', false)");
+  });
+});
+
+describe('Editable Card Templates & Shape Elements', () => {
+  const NEW_TEMPLATE_IDS = [
+    'gold-obsidian-split',
+    'royal-badge-vertical',
+    'champagne-diagonal',
+    'noir-gold-arc',
+    'slate-wave-minimal',
+    'sand-taupe-signature',
+    'cream-terracotta-atelier',
+  ];
+
+  it('includes all 7 new fully-editable templates in DEFAULT_CARD_TEMPLATES with valid shapes', () => {
+    const ids = DEFAULT_CARD_TEMPLATES.map((t) => t.templateId);
+    for (const id of NEW_TEMPLATE_IDS) {
+      expect(ids).toContain(id);
+      const tpl = DEFAULT_CARD_TEMPLATES.find((t) => t.templateId === id)!;
+      expect(tpl.frontSpec.elements.length).toBeGreaterThan(0);
+      expect(tpl.backSpec.elements.length).toBeGreaterThan(0);
+      const totalShapes = (tpl.frontSpec.shapes?.length || 0) + (tpl.backSpec.shapes?.length || 0);
+      expect(totalShapes).toBeGreaterThan(0);
+      for (const shape of [...(tpl.frontSpec.shapes || []), ...(tpl.backSpec.shapes || [])]) {
+        expect(['rect', 'circle', 'line', 'pill']).toContain(shape.kind);
+        expect(typeof shape.xPct).toBe('number');
+        expect(typeof shape.yPct).toBe('number');
+        expect(typeof shape.widthPct).toBe('number');
+        expect(typeof shape.heightPct).toBe('number');
+        expect(shape.color).toMatch(/^(#[0-9a-fA-F]{3,8}|transparent)$/);
+      }
+    }
+  });
+
+  it('keeps all templates free of hardcoded sample personal names or phone numbers', () => {
+    const forbiddenLiterals = ['Jane Doe', 'Michal Johns', 'Mina Nguyen', 'Olivia Wilson', 'Jonathan', 'Aaron Loeb'];
+    for (const tpl of DEFAULT_CARD_TEMPLATES) {
+      const texts = [
+        ...tpl.frontSpec.elements.map((e) => e.text),
+        ...tpl.backSpec.elements.map((e) => e.text),
+      ];
+      for (const txt of texts) {
+        for (const forbidden of forbiddenLiterals) {
+          expect(txt.toLowerCase()).not.toContain(forbidden.toLowerCase());
+        }
+      }
+      if (tpl.frontSpec.showAvatar && tpl.frontSpec.avatarShape) {
+        expect(['circle', 'rounded', 'square']).toContain(tpl.frontSpec.avatarShape);
+      }
+    }
+  });
+
+  it('registers Azure Tech Waves background as the sole default template and prioritizes default first in sortCardTemplates', () => {
+    const azure = DEFAULT_CARD_TEMPLATES.find((t) => t.templateId === 'azure-tech-waves');
+    expect(azure).toBeDefined();
+    expect(azure!.isDefault).toBe(true);
+    expect(azure!.active).toBe(true);
+    expect(azure!.frontSpec.backgroundImageUrl).toBe(
+      '/assets/aistudio/Abstract_blue_healthcare_technology_waves_d3f00c1d.webp'
+    );
+    expect(azure!.backSpec.backgroundImageUrl).toBe(
+      '/assets/aistudio/Abstract_blue_healthcare_technology_waves_d3f00c1d.webp'
+    );
+
+    const defaults = DEFAULT_CARD_TEMPLATES.filter((t) => t.isDefault);
+    expect(defaults.map((t) => t.templateId)).toEqual(['azure-tech-waves']);
+
+    const sortedWithCustomDefault = sortCardTemplates([
+      ...DEFAULT_CARD_TEMPLATES.filter((t) => t.templateId !== 'minimal-white').map((t) => ({
+        ...t,
+        isDefault: false,
+      })),
+      { ...DEFAULT_CARD_TEMPLATES.find((t) => t.templateId === 'minimal-white')!, isDefault: true },
+    ]);
+    expect(sortedWithCustomDefault[0].templateId).toBe('minimal-white');
+  });
+});
 

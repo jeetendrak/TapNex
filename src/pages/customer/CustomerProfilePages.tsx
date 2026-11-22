@@ -137,7 +137,7 @@ const WatermarkedProfileModal: React.FC<{
           {isPaid ? (
             <div className="flex items-center gap-2 text-xs font-semibold text-emerald-300">
               <Check className="h-3.5 w-3.5" />
-              <span>Live Profile Preview · Payment Confirmed</span>
+              <span>Live Profile Preview · Active &amp; Unlocked</span>
             </div>
           ) : (
             <div className="flex items-center gap-2 text-xs font-semibold text-amber-300">
@@ -171,7 +171,7 @@ const WatermarkedProfileModal: React.FC<{
         <div className="relative z-10 p-6 space-y-5">
           {!isPaid && (
             <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900">
-              Phone number, email ID, direct actions, and live share URL remain masked/locked until card payment is confirmed.
+              Phone number, email ID, direct actions, and live share URL remain masked/locked until card payment is confirmed or approved by an admin.
             </div>
           )}
 
@@ -358,8 +358,10 @@ export const CustomerOverviewPage: React.FC = () => {
   const { profiles, activeProfile, selectProfile, loading, reload } = useActiveCustomerProfile();
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [designs, setDesigns] = useState<CardDesignRecord[]>([]);
+  const [addModalOpen, setAddModalOpen] = useState(false);
   const [newLabel, setNewLabel] = useState('');
   const [newSlug, setNewSlug] = useState('');
+  const [modalSlugStatus, setModalSlugStatus] = useState<'idle' | 'available' | 'taken'>('idle');
   const [creatingProfile, setCreatingProfile] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [cardPreviewOpen, setCardPreviewOpen] = useState(false);
@@ -390,25 +392,61 @@ export const CustomerOverviewPage: React.FC = () => {
           profileId: activeProfile.profileId,
         })
       : savedProfileDesign;
-  const hasPaid = isOrderPaymentConfirmed(orders, activeProfile?.profileId, activeProfile?.slug);
+  const hasPaid =
+    isOrderPaymentConfirmed(orders, activeProfile?.profileId, activeProfile?.slug) ||
+    Boolean(activeProfile?.adminApproved);
   const publicUrl = activeProfile && hasPaid ? `${window.location.origin}/p/${activeProfile.slug}` : '';
+
+  const openAddProfileModal = () => {
+    setNewLabel('');
+    setNewSlug('');
+    setModalSlugStatus('idle');
+    setAddModalOpen(true);
+  };
+
+  const handleCheckModalSlug = async () => {
+    const clean = sanitizeSlug(newSlug);
+    setNewSlug(clean);
+    if (clean.length < 3) {
+      setModalSlugStatus('taken');
+      return;
+    }
+    const ok = await isSlugAvailable(clean);
+    setModalSlugStatus(ok ? 'available' : 'taken');
+  };
 
   const handleCreateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userRecord) return;
+    const labelToUse = newLabel.trim() || `Profile ${profiles.length + 1}`;
+    const rawSlug = newSlug.trim() || labelToUse;
+    const cleanSlug = sanitizeSlug(rawSlug);
+    if (cleanSlug.length < 3) {
+      notify('Custom slug too short', 'Please enter at least 3 letters/numbers for your custom profile URL slug.', 'error');
+      return;
+    }
     setCreatingProfile(true);
     try {
+      const available = await isSlugAvailable(cleanSlug);
+      if (!available) {
+        setModalSlugStatus('taken');
+        notify('Slug already taken', 'Please pick a different custom slug for this digital profile.', 'error');
+        setCreatingProfile(false);
+        return;
+      }
       const created = await createAdditionalProfile(
         userRecord.uid,
-        newLabel || 'Business Profile',
-        newSlug || `${userRecord.username || 'card'}-${profiles.length + 1}`,
+        labelToUse,
+        cleanSlug,
         { fullName: userRecord.displayName || '', email: userRecord.email || '' }
       );
       localStorage.setItem(`tapnex_active_profile_${userRecord.uid}`, created.profileId);
       setNewLabel('');
       setNewSlug('');
+      setAddModalOpen(false);
       await reload();
-      notify('New digital profile created', created.profileLabel || 'Profile saved. Payment unlocks the live share URL.', 'success');
+      notify('Digital profile created', `Now editing "${created.profileLabel}" — fill in your details below.`, 'success');
+      navigate('/dashboard/profile');
     } catch (err) {
       notify('Unable to create profile', err instanceof Error ? err.message : 'Try a different slug.', 'error');
     } finally {
@@ -459,7 +497,9 @@ export const CustomerOverviewPage: React.FC = () => {
                 {!activeProfile?.isPublic
                   ? 'Paused / Private'
                   : hasPaid
-                    ? 'Published & Active'
+                    ? activeProfile?.adminApproved && !isOrderPaymentConfirmed(orders, activeProfile?.profileId, activeProfile?.slug)
+                      ? 'Approved by Admin (Live)'
+                      : 'Published & Active'
                     : 'Payment Pending (Locked)'}
               </div>
               {activeProfile && hasPaid && activeProfile.isPublic ? (
@@ -514,18 +554,28 @@ export const CustomerOverviewPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Digital Profiles Switcher & Payment-Gated Copy */}
+          {/* Digital Profiles Switcher & + Digital Profile Trigger */}
           <div className="bg-white border border-slate-200 rounded-2xl p-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="font-display text-base font-bold text-[#0B1D3A]">Your Digital Profiles</h2>
                 <p className="text-xs text-slate-500 mt-0.5">
                   {hasPaid
-                    ? 'Payment confirmed — your live profile URL is unlocked for sharing.'
-                    : 'Preview your profile with watermarked protection. Your active URL unlocks as soon as payment is confirmed.'}
+                    ? 'Active & unlocked — your live profile URL is ready for sharing.'
+                    : 'Preview your profile with watermarked protection. Your active URL unlocks upon payment or admin approval.'}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                {appSettings.multipleProfilesEnabled && (
+                  <button
+                    type="button"
+                    onClick={openAddProfileModal}
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-[#1D4ED8] hover:bg-blue-700 text-white text-xs font-semibold whitespace-nowrap min-h-[40px]"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Digital Profile</span>
+                  </button>
+                )}
                 {activeProfile && (
                   <button
                     type="button"
@@ -578,7 +628,7 @@ export const CustomerOverviewPage: React.FC = () => {
             <div className="mt-4 flex flex-wrap gap-2.5">
               {profiles.map((p) => {
                 const selected = p.profileId === activeProfile?.profileId;
-                const pPaid = isOrderPaymentConfirmed(orders, p.profileId, p.slug);
+                const pPaid = isOrderPaymentConfirmed(orders, p.profileId, p.slug) || Boolean(p.adminApproved);
                 return (
                   <button
                     key={p.profileId}
@@ -595,34 +645,114 @@ export const CustomerOverviewPage: React.FC = () => {
                 );
               })}
             </div>
-
-            {appSettings.multipleProfilesEnabled && (
-              <form onSubmit={handleCreateProfile} className="mt-5 pt-5 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <input
-                  type="text"
-                  value={newLabel}
-                  onChange={(e) => setNewLabel(e.target.value)}
-                  placeholder="Profile label (e.g. Real Estate)"
-                  className="px-3 py-2.5 border border-slate-300 rounded-lg text-sm"
-                />
-                <input
-                  type="text"
-                  value={newSlug}
-                  onChange={(e) => setNewSlug(e.target.value)}
-                  placeholder="Custom slug (e.g. jeet-realty)"
-                  className="px-3 py-2.5 border border-slate-300 rounded-lg text-sm font-mono"
-                />
-                <button
-                  type="submit"
-                  disabled={creatingProfile}
-                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-[#1D4ED8] text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 min-h-[44px]"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span>{creatingProfile ? 'Creating...' : 'Add Digital Profile'}</span>
-                </button>
-              </form>
-            )}
           </div>
+
+          {/* + Digital Profile Creation Modal -> Redirects to My Profile */}
+          {addModalOpen && (
+            <div
+              className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4"
+              role="dialog"
+              aria-modal="true"
+            >
+              <form
+                onSubmit={handleCreateProfile}
+                className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden"
+              >
+                <div className="px-6 py-4 bg-[#0B1D3A] text-white flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Plus className="h-4 w-4 text-cyan-300" />
+                    <h3 className="font-display font-bold text-base">Create New Digital Profile</h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAddModalOpen(false)}
+                    className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white"
+                    aria-label="Close modal"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="p-6 space-y-4">
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Choose a label and custom URL slug for your new digital card profile. We will take you straight to <strong>My Profile</strong> to fill in your details.
+                  </p>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Profile Label *</label>
+                    <input
+                      type="text"
+                      required
+                      value={newLabel}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setNewLabel(val);
+                        if (!newSlug || newSlug === sanitizeSlug(newLabel)) {
+                          setNewSlug(sanitizeSlug(val));
+                          setModalSlugStatus('idle');
+                        }
+                      }}
+                      placeholder="e.g. Consulting, Real Estate, Personal"
+                      className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Custom Public URL Slug *</label>
+                    <div className="flex gap-2">
+                      <div className="flex flex-1 items-center border border-slate-300 rounded-lg overflow-hidden bg-slate-50">
+                        <span className="px-2.5 text-xs font-mono text-slate-500 border-r border-slate-200 py-2.5">
+                          /p/
+                        </span>
+                        <input
+                          type="text"
+                          required
+                          value={newSlug}
+                          onChange={(e) => {
+                            setNewSlug(e.target.value.toLowerCase());
+                            setModalSlugStatus('idle');
+                          }}
+                          placeholder="jeet-consulting"
+                          className="flex-1 px-3 py-2 bg-white text-sm font-mono focus:outline-none"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCheckModalSlug}
+                        className="px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap"
+                      >
+                        Check
+                      </button>
+                    </div>
+                    {modalSlugStatus === 'available' && (
+                      <p className="mt-1 text-xs text-emerald-700 font-medium">Slug is available!</p>
+                    )}
+                    {modalSlugStatus === 'taken' && (
+                      <p className="mt-1 text-xs text-rose-700 font-medium">Slug unavailable or shorter than 3 characters.</p>
+                    )}
+                  </div>
+
+                  <div className="pt-2 flex items-center justify-end gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setAddModalOpen(false)}
+                      className="px-4 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={creatingProfile}
+                      className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-[#1D4ED8] hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-50"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>{creatingProfile ? 'Creating Profile...' : 'Create & Fill Profile Info'}</span>
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          )}
 
           {activeProfile && (
             <WatermarkedProfileModal
@@ -710,10 +840,67 @@ export const CustomerOverviewPage: React.FC = () => {
   );
 };
 
+// Shared Grouped Sub-Navigation + Profile Switcher Dropdown for Customer Profile Hub
+const CustomerProfileHubHeader: React.FC<{
+  activeTab: 'profile' | 'social' | 'custom' | 'visibility';
+  profiles: ProfileRecord[];
+  activeProfile: ProfileRecord | null;
+  onSelectProfile: (profileId: string) => void;
+}> = ({ activeTab, profiles, activeProfile, onSelectProfile }) => {
+  const tabs: { id: 'profile' | 'social' | 'custom' | 'visibility'; label: string; to: string }[] = [
+    { id: 'profile', label: 'Profile Info', to: '/dashboard/profile' },
+    { id: 'social', label: 'Social Links', to: '/dashboard/social-links' },
+    { id: 'custom', label: 'Custom Fields', to: '/dashboard/custom-fields' },
+    { id: 'visibility', label: 'Public Profile Settings', to: '/dashboard/visibility' },
+  ];
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 mb-6 space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-1.5 bg-slate-100 p-1 rounded-xl">
+          {tabs.map((tab) => (
+            <Link
+              key={tab.id}
+              to={tab.to}
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                activeTab === tab.id
+                  ? 'bg-[#0B1D3A] text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
+              }`}
+            >
+              {tab.label}
+            </Link>
+          ))}
+        </div>
+
+        {profiles.length > 0 && activeProfile && (
+          <div className="flex items-center gap-2 shrink-0">
+            <label htmlFor="profile-switcher-select" className="text-xs font-semibold text-slate-600 whitespace-nowrap">
+              Active Profile:
+            </label>
+            <select
+              id="profile-switcher-select"
+              value={activeProfile.profileId}
+              onChange={(e) => onSelectProfile(e.target.value)}
+              className="px-3 py-2 border border-slate-300 rounded-xl text-xs font-semibold bg-white text-[#0B1D3A] min-w-[200px]"
+            >
+              {profiles.map((p) => (
+                <option key={p.profileId} value={p.profileId}>
+                  {p.profileLabel || p.personalInformation.fullName || p.slug} (/p/{p.slug})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // 2. My Profile (Personal Information + Slug)
 export const CustomerProfilePage: React.FC = () => {
   const { userRecord } = useAuth();
-  const { activeProfile, setActiveProfile, loading, reload } = useActiveCustomerProfile();
+  const { profiles, activeProfile, setActiveProfile, selectProfile, loading, reload } = useActiveCustomerProfile();
   const { notify, confirmAction } = useToast();
   const [slugInput, setSlugInput] = useState('');
   const [previousSlug, setPreviousSlug] = useState('');
@@ -830,7 +1017,9 @@ export const CustomerProfilePage: React.FC = () => {
   }
 
   const info = activeProfile.personalInformation;
-  const hasPaid = isOrderPaymentConfirmed(orders, activeProfile.profileId, activeProfile.slug);
+  const hasPaid =
+    isOrderPaymentConfirmed(orders, activeProfile.profileId, activeProfile.slug) ||
+    Boolean(activeProfile.adminApproved);
 
   const handleDeleteCurrentProfile = async () => {
     if (!userRecord) return;
@@ -850,7 +1039,13 @@ export const CustomerProfilePage: React.FC = () => {
   };
 
   return (
-    <PortalLayout portal="customer" title="Personal & Business Information">
+    <PortalLayout portal="customer" title="My Profile & Visibility">
+      <CustomerProfileHubHeader
+        activeTab="profile"
+        profiles={profiles}
+        activeProfile={activeProfile}
+        onSelectProfile={selectProfile}
+      />
       <form onSubmit={handleSave} className="space-y-6">
         {/* Profile Photo & Slug */}
         <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-6">
@@ -1243,7 +1438,7 @@ export const CustomerProfilePage: React.FC = () => {
 
 // 3. Social Links Manager (Auto-Saves Immediately on Add / Toggle / Move / Delete)
 export const CustomerSocialLinksPage: React.FC = () => {
-  const { activeProfile, setActiveProfile, loading } = useActiveCustomerProfile();
+  const { profiles, activeProfile, setActiveProfile, selectProfile, loading } = useActiveCustomerProfile();
   const { appSettings } = useAuth();
   const { notify } = useToast();
   const [platform, setPlatform] = useState<SocialPlatformId>('linkedin');
@@ -1324,7 +1519,13 @@ export const CustomerSocialLinksPage: React.FC = () => {
   }
 
   return (
-    <PortalLayout portal="customer" title="Social Media Links">
+    <PortalLayout portal="customer" title="My Profile & Visibility">
+      <CustomerProfileHubHeader
+        activeTab="social"
+        profiles={profiles}
+        activeProfile={activeProfile}
+        onSelectProfile={selectProfile}
+      />
       <div className="space-y-6">
         <form onSubmit={handleAdd} className="bg-white border border-slate-200 rounded-2xl p-6 grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
           <div>
@@ -1475,7 +1676,7 @@ export const CustomerSocialLinksPage: React.FC = () => {
 
 // 4. Custom Fields Manager (Auto-Saves Immediately)
 export const CustomerCustomFieldsPage: React.FC = () => {
-  const { activeProfile, setActiveProfile, loading } = useActiveCustomerProfile();
+  const { profiles, activeProfile, setActiveProfile, selectProfile, loading } = useActiveCustomerProfile();
   const { appSettings } = useAuth();
   const { notify } = useToast();
   const [label, setLabel] = useState('');
@@ -1530,7 +1731,13 @@ export const CustomerCustomFieldsPage: React.FC = () => {
   }
 
   return (
-    <PortalLayout portal="customer" title="Custom Profile Fields">
+    <PortalLayout portal="customer" title="My Profile & Visibility">
+      <CustomerProfileHubHeader
+        activeTab="custom"
+        profiles={profiles}
+        activeProfile={activeProfile}
+        onSelectProfile={selectProfile}
+      />
       <div className="space-y-6">
         <form onSubmit={handleAdd} className="bg-white border border-slate-200 rounded-2xl p-6 grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
           <div>
@@ -1646,7 +1853,7 @@ export const CustomerCustomFieldsPage: React.FC = () => {
 
 // 5. Public Profile Visibility Controls (Auto-Saves & Syncs Immediately)
 export const CustomerVisibilityPage: React.FC = () => {
-  const { activeProfile, setActiveProfile, loading } = useActiveCustomerProfile();
+  const { profiles, activeProfile, setActiveProfile, selectProfile, loading } = useActiveCustomerProfile();
   const { userRecord, appSettings } = useAuth();
   const { notify } = useToast();
   const [saving, setSaving] = useState(false);
@@ -1661,13 +1868,15 @@ export const CustomerVisibilityPage: React.FC = () => {
 
   if (loading || !activeProfile) {
     return (
-      <PortalLayout portal="customer" title="Public Profile Settings">
+      <PortalLayout portal="customer" title="My Profile & Visibility">
         <div className="h-64 bg-slate-200 rounded-xl animate-pulse" />
       </PortalLayout>
     );
   }
 
-  const hasPaid = isOrderPaymentConfirmed(orders, activeProfile.profileId, activeProfile.slug);
+  const hasPaid =
+    isOrderPaymentConfirmed(orders, activeProfile.profileId, activeProfile.slug) ||
+    Boolean(activeProfile.adminApproved);
   const vis = activeProfile.visibilitySettings;
   const info = activeProfile.personalInformation;
 
@@ -1759,7 +1968,13 @@ export const CustomerVisibilityPage: React.FC = () => {
   };
 
   return (
-    <PortalLayout portal="customer" title="Public Profile Visibility">
+    <PortalLayout portal="customer" title="My Profile & Visibility">
+      <CustomerProfileHubHeader
+        activeTab="visibility"
+        profiles={profiles}
+        activeProfile={activeProfile}
+        onSelectProfile={selectProfile}
+      />
       <div className="space-y-6">
         <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>

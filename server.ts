@@ -25,10 +25,19 @@ const APP_BASE_URL = process.env.APP_URL || process.env.VITE_APP_URL || `http://
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || '';
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || '';
 const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || '';
+const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID || '';
+const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY || '';
+const EASEBUZZ_MERCHANT_KEY = process.env.EASEBUZZ_MERCHANT_KEY || '';
+const EASEBUZZ_SALT = process.env.EASEBUZZ_SALT || '';
+const PAYU_MERCHANT_KEY = process.env.PAYU_MERCHANT_KEY || '';
+const PAYU_MERCHANT_SALT = process.env.PAYU_MERCHANT_SALT || '';
+const GOOGLE_PAY_MERCHANT_ID = process.env.GOOGLE_PAY_MERCHANT_ID || '';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'TapNex <orders@tapnex.in>';
 
-// Deterministic runtime sandbox secret when live Razorpay credentials are not configured
+type GatewayId = 'razorpay' | 'cashfree' | 'easebuzz' | 'payu' | 'gpay' | 'upi';
+
+// Deterministic runtime sandbox secret when live gateway credentials are not configured
 const SANDBOX_SIGNING_SECRET =
   process.env.RAZORPAY_SANDBOX_SECRET ||
   crypto.createHash('sha256').update(`tapnex-sandbox-${process.env.APP_URL || 'local'}`).digest('hex');
@@ -45,6 +54,11 @@ app.get('/api/health', (_req, res) => {
     integrations: {
       razorpayMode: RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET ? 'live' : 'sandbox',
       razorpayKeyConfigured: Boolean(RAZORPAY_KEY_ID),
+      cashfreeConfigured: Boolean(CASHFREE_APP_ID && CASHFREE_SECRET_KEY),
+      easebuzzConfigured: Boolean(EASEBUZZ_MERCHANT_KEY && EASEBUZZ_SALT),
+      payuConfigured: Boolean(PAYU_MERCHANT_KEY && PAYU_MERCHANT_SALT),
+      gpayConfigured: Boolean(GOOGLE_PAY_MERCHANT_ID),
+      upiSupported: true,
       resendConfigured: Boolean(RESEND_API_KEY),
       superAdminBootstrapEnabled: process.env.SUPERADMIN_BOOTSTRAP_ENABLED === 'true',
       appBaseUrl: APP_BASE_URL,
@@ -98,64 +112,223 @@ app.post('/api/qr/generate', async (req, res) => {
   }
 });
 
-// --- Razorpay Order Creation (Live API or Explicit Sandbox Mode) ---
+// --- Multi-Gateway Order Creation (Razorpay, Cashfree, Easebuzz, PayU, Google Pay, UPI) ---
 app.post('/api/payments/create-order', async (req, res) => {
   try {
-    const { orderId, amountInr, receipt, customerEmail } = req.body as {
+    const {
+      orderId,
+      amountInr,
+      receipt,
+      customerEmail,
+      customerName,
+      customerPhone,
+      gateway = 'razorpay',
+      requestedMode,
+      upiId,
+      upiPayeeName,
+    } = req.body as {
       orderId?: string;
       amountInr?: number;
       receipt?: string;
       customerEmail?: string;
+      customerName?: string;
+      customerPhone?: string;
+      gateway?: GatewayId;
+      requestedMode?: 'sandbox' | 'live';
+      upiId?: string;
+      upiPayeeName?: string;
     };
 
     if (!orderId || !amountInr || Number(amountInr) <= 0) {
       return res.status(400).json({ error: 'Valid orderId and positive amountInr are required.' });
     }
 
+    const allowedGateways: GatewayId[] = ['razorpay', 'cashfree', 'easebuzz', 'payu', 'gpay', 'upi'];
+    const safeGateway: GatewayId = allowedGateways.includes(gateway) ? gateway : 'razorpay';
     const amountPaise = Math.round(Number(amountInr) * 100);
-    const isLiveConfigured = Boolean(RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET);
+    const amountDecimal = Number(amountInr).toFixed(2);
 
-    if (isLiveConfigured) {
-      const authHeader = Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64');
-      const rzpResponse = await fetch('https://api.razorpay.com/v1/orders', {
-        method: 'POST',
-        headers: {
-          Authorization: `Basic ${authHeader}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          amount: amountPaise,
-          currency: 'INR',
-          receipt: receipt || orderId,
-          notes: { internalOrderId: orderId, customerEmail: customerEmail || '' },
-        }),
-      });
+    if (safeGateway === 'razorpay') {
+      const isLiveConfigured = Boolean(RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET) && requestedMode !== 'sandbox';
+      if (isLiveConfigured) {
+        const authHeader = Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64');
+        const rzpResponse = await fetch('https://api.razorpay.com/v1/orders', {
+          method: 'POST',
+          headers: {
+            Authorization: `Basic ${authHeader}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            amount: amountPaise,
+            currency: 'INR',
+            receipt: receipt || orderId,
+            notes: { internalOrderId: orderId, customerEmail: customerEmail || '' },
+          }),
+        });
 
-      if (!rzpResponse.ok) {
-        const errText = await rzpResponse.text();
-        return res.status(502).json({ error: 'Razorpay order creation failed.', details: errText });
+        if (!rzpResponse.ok) {
+          const errText = await rzpResponse.text();
+          return res.status(502).json({ error: 'Razorpay order creation failed.', details: errText });
+        }
+
+        const rzpOrder = (await rzpResponse.json()) as { id: string; amount: number; currency: string };
+        return res.json({
+          gateway: 'razorpay',
+          mode: 'razorpay_live',
+          keyId: RAZORPAY_KEY_ID,
+          gatewayOrderId: rzpOrder.id,
+          amountPaise: rzpOrder.amount,
+          currency: rzpOrder.currency,
+        });
       }
 
-      const rzpOrder = (await rzpResponse.json()) as { id: string; amount: number; currency: string };
+      const sandboxOrderId = `order_rzp_sbx_${orderId.slice(0, 10)}_${Date.now()}`;
       return res.json({
-        mode: 'razorpay_live',
-        keyId: RAZORPAY_KEY_ID,
-        gatewayOrderId: rzpOrder.id,
-        amountPaise: rzpOrder.amount,
-        currency: rzpOrder.currency,
+        gateway: 'razorpay',
+        mode: 'razorpay_sandbox',
+        keyId: 'rzp_test_sandbox_configured_server',
+        gatewayOrderId: sandboxOrderId,
+        amountPaise,
+        currency: 'INR',
+        sandboxNotice: 'Razorpay Sandbox active. Add RAZORPAY_KEY_ID & RAZORPAY_KEY_SECRET on server for live mode.',
       });
     }
 
-    // Explicit Sandbox Mode (when live Razorpay credentials are not configured)
-    const sandboxOrderId = `order_sbx_${orderId.slice(0, 12)}_${Date.now()}`;
+    if (safeGateway === 'cashfree') {
+      const hasLiveKeys = Boolean(CASHFREE_APP_ID && CASHFREE_SECRET_KEY) && requestedMode === 'live';
+      if (hasLiveKeys) {
+        const cfResponse = await fetch('https://api.cashfree.com/pg/orders', {
+          method: 'POST',
+          headers: {
+            'x-client-id': CASHFREE_APP_ID,
+            'x-client-secret': CASHFREE_SECRET_KEY,
+            'x-api-version': '2023-08-01',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            order_id: `cf_${orderId.slice(0, 18)}_${Date.now()}`,
+            order_amount: Number(amountDecimal),
+            order_currency: 'INR',
+            customer_details: {
+              customer_id: orderId.slice(0, 24),
+              customer_email: customerEmail || 'customer@tapnex.in',
+              customer_phone: (customerPhone || '9999999999').replace(/[^0-9]/g, '').slice(-10) || '9999999999',
+              customer_name: customerName || 'TapNex Customer',
+            },
+          }),
+        });
+        if (!cfResponse.ok) {
+          const errText = await cfResponse.text();
+          return res.status(502).json({ error: 'Cashfree order creation failed.', details: errText });
+        }
+        const cfData = (await cfResponse.json()) as { order_id: string; payment_session_id?: string };
+        return res.json({
+          gateway: 'cashfree',
+          mode: 'cashfree_live',
+          gatewayOrderId: cfData.order_id,
+          paymentSessionId: cfData.payment_session_id,
+          amountPaise,
+          currency: 'INR',
+        });
+      }
+      return res.json({
+        gateway: 'cashfree',
+        mode: 'cashfree_sandbox',
+        gatewayOrderId: `order_cf_sbx_${orderId.slice(0, 10)}_${Date.now()}`,
+        amountPaise,
+        currency: 'INR',
+        sandboxNotice: 'Cashfree Sandbox active. Configure CASHFREE_APP_ID & CASHFREE_SECRET_KEY on server for live mode.',
+      });
+    }
+
+    if (safeGateway === 'easebuzz') {
+      const hasLiveKeys = Boolean(EASEBUZZ_MERCHANT_KEY && EASEBUZZ_SALT) && requestedMode === 'live';
+      const txnid = `eb_${orderId.slice(0, 12)}_${Date.now()}`;
+      if (hasLiveKeys) {
+        const hashString = `${EASEBUZZ_MERCHANT_KEY}|${txnid}|${amountDecimal}|NFC Smart Card|${customerName || 'Customer'}|${customerEmail || 'customer@tapnex.in'}|||||||||||${EASEBUZZ_SALT}`;
+        const hash = crypto.createHash('sha512').update(hashString).digest('hex');
+        return res.json({
+          gateway: 'easebuzz',
+          mode: 'easebuzz_live',
+          keyId: EASEBUZZ_MERCHANT_KEY,
+          gatewayOrderId: txnid,
+          hash,
+          amountPaise,
+          currency: 'INR',
+        });
+      }
+      return res.json({
+        gateway: 'easebuzz',
+        mode: 'easebuzz_sandbox',
+        gatewayOrderId: `order_eb_sbx_${orderId.slice(0, 10)}_${Date.now()}`,
+        amountPaise,
+        currency: 'INR',
+        sandboxNotice: 'Easebuzz Sandbox active. Configure EASEBUZZ_MERCHANT_KEY & EASEBUZZ_SALT on server for live mode.',
+      });
+    }
+
+    if (safeGateway === 'payu') {
+      const hasLiveKeys = Boolean(PAYU_MERCHANT_KEY && PAYU_MERCHANT_SALT) && requestedMode === 'live';
+      const txnid = `payu_${orderId.slice(0, 12)}_${Date.now()}`;
+      if (hasLiveKeys) {
+        const hashString = `${PAYU_MERCHANT_KEY}|${txnid}|${amountDecimal}|TapNex NFC Card|${customerName || 'Customer'}|${customerEmail || 'customer@tapnex.in'}|||||||||||${PAYU_MERCHANT_SALT}`;
+        const hash = crypto.createHash('sha512').update(hashString).digest('hex');
+        return res.json({
+          gateway: 'payu',
+          mode: 'payu_live',
+          keyId: PAYU_MERCHANT_KEY,
+          gatewayOrderId: txnid,
+          hash,
+          amountPaise,
+          currency: 'INR',
+        });
+      }
+      return res.json({
+        gateway: 'payu',
+        mode: 'payu_sandbox',
+        gatewayOrderId: `order_payu_sbx_${orderId.slice(0, 10)}_${Date.now()}`,
+        amountPaise,
+        currency: 'INR',
+        sandboxNotice: 'PayU Sandbox active. Configure PAYU_MERCHANT_KEY & PAYU_MERCHANT_SALT on server for live mode.',
+      });
+    }
+
+    // UPI Direct or Google Pay (UPI intent + scannable UPI QR)
+    const vpa = (upiId || 'tapnex@upi').trim();
+    const payee = encodeURIComponent((upiPayeeName || 'TapNex Smart Cards').trim());
+    const txRef = `${safeGateway}_${orderId.slice(0, 10)}_${Date.now()}`;
+    const upiUri = `upi://pay?pa=${encodeURIComponent(vpa)}&pn=${payee}&tr=${encodeURIComponent(txRef)}&tn=${encodeURIComponent(`TapNex Order ${receipt || orderId}`)}&am=${amountDecimal}&cu=INR`;
+    const upiQrDataUrl = await QRCode.toDataURL(upiUri, {
+      errorCorrectionLevel: 'M',
+      margin: 2,
+      width: 512,
+      color: { dark: '#0B1D3A', light: '#FFFFFF' },
+    });
+
+    const isLiveUpi = requestedMode === 'live' && Boolean(upiId);
+    const mode =
+      safeGateway === 'gpay'
+        ? isLiveUpi
+          ? 'gpay_live'
+          : 'gpay_sandbox'
+        : isLiveUpi
+          ? 'upi_live'
+          : 'upi_sandbox';
+
     return res.json({
-      mode: 'razorpay_sandbox',
-      keyId: 'rzp_test_sandbox_configured_server',
-      gatewayOrderId: sandboxOrderId,
+      gateway: safeGateway,
+      mode,
+      keyId: GOOGLE_PAY_MERCHANT_ID || vpa,
+      gatewayOrderId: txRef,
       amountPaise,
       currency: 'INR',
+      upiUri,
+      upiQrDataUrl,
+      upiId: vpa,
       sandboxNotice:
-        'Running in Razorpay Sandbox Mode. Set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in server environment for live payments.',
+        isLiveUpi
+          ? undefined
+          : `${safeGateway === 'gpay' ? 'Google Pay' : 'UPI'} running in sandbox/test verification mode.`,
     });
   } catch (err) {
     console.error('Create payment order error:', err);
@@ -163,25 +336,31 @@ app.post('/api/payments/create-order', async (req, res) => {
   }
 });
 
-// --- Razorpay Sandbox Challenge Signature Helper (Produces Valid HMAC-SHA256 for Sandbox Verification) ---
+// --- Multi-Gateway Sandbox Challenge Signature Helper (Produces Valid HMAC-SHA256 for Verification) ---
 app.post('/api/payments/sandbox-authorize', (req, res) => {
-  if (RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET) {
-    return res.status(403).json({ error: 'Sandbox authorization is disabled when live Razorpay keys are active.' });
-  }
-  const { gatewayOrderId, simulateOutcome = 'success' } = req.body as {
+  const { gatewayOrderId, gateway = 'razorpay', simulateOutcome = 'success', utrRef } = req.body as {
     gatewayOrderId?: string;
+    gateway?: GatewayId;
     simulateOutcome?: 'success' | 'failure' | 'cancelled';
+    utrRef?: string;
   };
   if (!gatewayOrderId) {
     return res.status(400).json({ error: 'gatewayOrderId is required.' });
   }
+  if (gateway === 'razorpay' && RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET) {
+    return res.status(403).json({ error: 'Razorpay sandbox authorization is disabled when live Razorpay keys are active.' });
+  }
   if (simulateOutcome !== 'success') {
     return res.json({
       outcome: simulateOutcome,
-      error: simulateOutcome === 'cancelled' ? 'Payment cancelled by user in Razorpay Sandbox.' : 'Payment declined by bank in Razorpay Sandbox.',
+      error:
+        simulateOutcome === 'cancelled'
+          ? `Payment cancelled by user in ${gateway.toUpperCase()} checkout.`
+          : `Payment declined by bank in ${gateway.toUpperCase()} checkout.`,
     });
   }
-  const gatewayPaymentId = `pay_sbx_${crypto.randomBytes(8).toString('hex')}`;
+  const cleanUtr = utrRef ? utrRef.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32) : '';
+  const gatewayPaymentId = cleanUtr ? `${gateway}_utr_${cleanUtr}` : `pay_${gateway}_sbx_${crypto.randomBytes(6).toString('hex')}`;
   const signature = crypto
     .createHmac('sha256', SANDBOX_SIGNING_SECRET)
     .update(`${gatewayOrderId}|${gatewayPaymentId}`)
@@ -189,6 +368,7 @@ app.post('/api/payments/sandbox-authorize', (req, res) => {
 
   return res.json({
     outcome: 'success',
+    gateway,
     gatewayOrderId,
     gatewayPaymentId,
     signature,
@@ -211,7 +391,7 @@ app.post('/api/payments/verify', async (req, res) => {
       gatewayOrderId?: string;
       gatewayPaymentId?: string;
       signature?: string;
-      mode?: 'razorpay_live' | 'razorpay_sandbox';
+      mode?: string;
       profileSlug?: string;
       appOrigin?: string;
     };
@@ -224,13 +404,12 @@ app.post('/api/payments/verify', async (req, res) => {
       return res.status(409).json({ error: 'Duplicate payment processing blocked (idempotent guard).' });
     }
 
-    const secret =
-      mode === 'razorpay_live' && RAZORPAY_KEY_SECRET
-        ? RAZORPAY_KEY_SECRET
-        : SANDBOX_SIGNING_SECRET;
-
-    if (mode === 'razorpay_live' && !RAZORPAY_KEY_SECRET) {
-      return res.status(500).json({ error: 'Server missing RAZORPAY_KEY_SECRET for live verification.' });
+    let secret = SANDBOX_SIGNING_SECRET;
+    if (mode === 'razorpay_live') {
+      if (!RAZORPAY_KEY_SECRET) {
+        return res.status(500).json({ error: 'Server missing RAZORPAY_KEY_SECRET for live verification.' });
+      }
+      secret = RAZORPAY_KEY_SECRET;
     }
 
     const expectedSignature = crypto

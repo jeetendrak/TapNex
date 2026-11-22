@@ -3,28 +3,19 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   User,
-  Share2,
-  ListPlus,
-  Eye,
   CreditCard,
   Package,
-  Truck,
   Settings,
-  HelpCircle,
   Printer,
   Users,
   ShieldCheck,
   QrCode,
-  BarChart3,
   FileText,
   Mail,
   LogOut,
   Menu,
   X,
   ExternalLink,
-  Sliders,
-  CheckSquare,
-  Globe,
   BookOpen,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -34,6 +25,7 @@ interface NavItem {
   label: string;
   to: string;
   icon: React.FC<{ className?: string }>;
+  activePrefixes?: string[];
 }
 
 interface PortalLayoutProps {
@@ -50,52 +42,109 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ portal, title, child
 
   const customerNav: NavItem[] = [
     { label: 'Overview', to: '/dashboard', icon: LayoutDashboard },
-    { label: 'My Profile', to: '/dashboard/profile', icon: User },
-    { label: 'Social Links', to: '/dashboard/social-links', icon: Share2 },
-    { label: 'Custom Fields', to: '/dashboard/custom-fields', icon: ListPlus },
-    { label: 'Public Profile Settings', to: '/dashboard/visibility', icon: Eye },
-    { label: 'Design My Card', to: '/dashboard/card-design', icon: CreditCard },
-    { label: 'My Orders', to: '/dashboard/orders', icon: Package },
-    { label: 'Order Tracking', to: '/dashboard/orders', icon: Truck },
-    { label: 'Account Settings', to: '/dashboard/settings', icon: Settings },
-    { label: 'Help & Support', to: '/dashboard/support', icon: HelpCircle },
+    {
+      label: 'My Profile & Visibility',
+      to: '/dashboard/profile',
+      icon: User,
+      activePrefixes: [
+        '/dashboard/profile',
+        '/dashboard/social-links',
+        '/dashboard/custom-fields',
+        '/dashboard/visibility',
+      ],
+    },
+    {
+      label: 'Design My Card',
+      to: '/dashboard/card-design',
+      icon: CreditCard,
+      activePrefixes: ['/dashboard/card-design', '/dashboard/checkout'],
+    },
+    {
+      label: 'Orders & Tracking',
+      to: '/dashboard/orders',
+      icon: Package,
+      activePrefixes: ['/dashboard/orders', '/dashboard/tracking'],
+    },
+    {
+      label: 'Account & Support',
+      to: '/dashboard/settings',
+      icon: Settings,
+      activePrefixes: ['/dashboard/settings', '/dashboard/support'],
+    },
     { label: 'User Guide (PDF)', to: '/guide', icon: BookOpen },
   ];
 
   const printerNav: NavItem[] = [
     { label: 'Printer Dashboard', to: '/printer/dashboard', icon: LayoutDashboard },
-    { label: 'Assigned Orders', to: '/printer/orders', icon: Printer },
+    {
+      label: 'Assigned Orders',
+      to: '/printer/orders',
+      icon: Printer,
+      activePrefixes: ['/printer/orders'],
+    },
     { label: 'Facility Profile', to: '/printer/profile', icon: User },
     { label: 'User Guide (PDF)', to: '/guide', icon: BookOpen },
   ];
 
   const adminNav: NavItem[] = [
     { label: 'Dashboard', to: '/admin/dashboard', icon: LayoutDashboard },
-    { label: 'Users & Customers', to: '/admin/users', icon: Users },
-    { label: 'Digital Profiles', to: '/admin/profiles', icon: Globe },
-    { label: 'Approved Designs', to: '/admin/approved-designs', icon: CheckSquare },
-    { label: 'Printers', to: '/admin/printers', icon: Printer },
-    { label: 'Orders & Payments', to: '/admin/orders', icon: Package },
-    { label: 'Transactions Ledger', to: '/admin/payments', icon: CreditCard },
-    { label: 'Card Templates', to: '/admin/card-designs', icon: FileText },
-    { label: 'QR Management', to: '/admin/qr-management', icon: QrCode },
-    { label: 'Shipping', to: '/admin/shipping', icon: Truck },
-    { label: 'Reports', to: '/admin/reports', icon: BarChart3 },
-    { label: 'Settings & Email', to: '/admin/settings', icon: Mail },
-    { label: 'Audit Logs', to: '/admin/audit-logs', icon: ShieldCheck },
+    {
+      label: 'Users, Profiles & Printers',
+      to: '/admin/users',
+      icon: Users,
+      activePrefixes: ['/admin/users', '/admin/profiles', '/admin/printers'],
+    },
+    {
+      label: 'Cards & Approved Designs',
+      to: '/admin/card-designs',
+      icon: FileText,
+      activePrefixes: ['/admin/card-designs', '/admin/approved-designs'],
+    },
+    {
+      label: 'Orders, Payments & Shipping',
+      to: '/admin/orders',
+      icon: Package,
+      activePrefixes: ['/admin/orders', '/admin/payments', '/admin/shipping'],
+    },
+    {
+      label: 'Gateways, QR & Reports',
+      to: '/admin/settings',
+      icon: Mail,
+      activePrefixes: ['/admin/settings', '/admin/qr-management', '/admin/reports', '/admin/audit-logs'],
+    },
     { label: 'User Guide (PDF)', to: '/guide', icon: BookOpen },
   ];
 
   const superAdminNav: NavItem[] = [
     { label: 'SuperAdmin Overview', to: '/superadmin/dashboard', icon: ShieldCheck },
-    { label: 'Roles & Administrators', to: '/superadmin/roles', icon: Users },
-    { label: 'Admin Permissions', to: '/superadmin/permissions', icon: Sliders },
-    { label: 'Approved Designs', to: '/admin/approved-designs', icon: CheckSquare },
-    { label: 'Digital Profiles', to: '/admin/profiles', icon: Globe },
-    { label: 'Orders & Payment Control', to: '/admin/orders', icon: Package },
-    { label: 'Direct URL QR Generator', to: '/superadmin/qr-generator', icon: QrCode },
-    { label: 'System Settings', to: '/superadmin/system-settings', icon: Settings },
-    { label: 'Admin Operations', to: '/admin/dashboard', icon: LayoutDashboard },
+    {
+      label: 'Roles & Permissions',
+      to: '/superadmin/roles',
+      icon: Users,
+      activePrefixes: ['/superadmin/roles', '/superadmin/permissions'],
+    },
+    {
+      label: 'Profiles, Orders & Designs',
+      to: '/admin/orders',
+      icon: Package,
+      activePrefixes: [
+        '/admin/orders',
+        '/admin/profiles',
+        '/admin/approved-designs',
+        '/admin/users',
+        '/admin/printers',
+        '/admin/payments',
+        '/admin/shipping',
+        '/admin/card-designs',
+      ],
+    },
+    { label: 'URL QR Generator', to: '/superadmin/qr-generator', icon: QrCode },
+    {
+      label: 'Gateways & System Settings',
+      to: '/superadmin/system-settings',
+      icon: Settings,
+      activePrefixes: ['/superadmin/system-settings'],
+    },
     { label: 'User Guide (PDF)', to: '/guide', icon: BookOpen },
   ];
 
@@ -122,6 +171,15 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ portal, title, child
     navigate('/login');
   };
 
+  const isNavItemActive = (item: NavItem) => {
+    if (item.activePrefixes && item.activePrefixes.length > 0) {
+      return item.activePrefixes.some(
+        (prefix) => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`)
+      );
+    }
+    return location.pathname === item.to;
+  };
+
   const SidebarContent = (
     <div className="flex flex-col h-full bg-[#050814] text-slate-200">
       <div className="px-4 py-4 border-b border-slate-800 space-y-2.5">
@@ -144,14 +202,14 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ portal, title, child
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
         {navItems.map((item, idx) => {
           const Icon = item.icon;
-          const isExact = location.pathname === item.to && !(item.label === 'Order Tracking');
+          const active = isNavItemActive(item);
           return (
             <Link
               key={`${item.to}-${idx}`}
               to={item.to}
               onClick={() => setSidebarOpen(false)}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors min-h-[40px] ${
-                isExact
+                active
                   ? 'bg-[#1D4ED8] text-white'
                   : 'text-slate-300 hover:bg-slate-800/70 hover:text-white'
               }`}

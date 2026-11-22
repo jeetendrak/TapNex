@@ -9,12 +9,12 @@ import { useToast } from '../../contexts/ToastContext';
 import type { CardTemplateRecord } from '../../types';
 
 const SAMPLE_INFO = {
-  fullName: 'Priya Deshmukh',
-  jobTitle: 'Principal Architect',
-  companyName: 'Studio Vastu',
-  mobile: '+91 98230 11240',
-  email: 'priya@studiovastu.in',
-  website: 'studiovastu.in',
+  fullName: 'Your Name',
+  jobTitle: 'Your Designation',
+  companyName: 'Your Company Name',
+  mobile: 'Your Number',
+  email: 'Your Email ID',
+  website: 'Your Website',
 };
 
 export const HowItWorksPage: React.FC = () => (
@@ -82,7 +82,9 @@ export const FeaturesPage: React.FC = () => (
 );
 
 export const CardDesignsPage: React.FC = () => {
-  const [templates, setTemplates] = useState<CardTemplateRecord[]>(DEFAULT_CARD_TEMPLATES);
+  const [templates, setTemplates] = useState<CardTemplateRecord[]>(
+    DEFAULT_CARD_TEMPLATES.filter((t) => t.active)
+  );
   useEffect(() => {
     getCardTemplates().then(setTemplates);
   }, []);
@@ -142,9 +144,9 @@ export const PricingPage: React.FC = () => (
       </p>
       <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-6">
         {[
-          { tier: 'Minimal Ceramic PVC', price: '₹899', desc: 'Crisp matte white or dual-tone PVC NFC card.', items: ['85.6 × 54 mm trim', '18% GST & ₹99 shipping at checkout', 'Instant vCard download'] },
-          { tier: 'Signature Executive Navy', price: '₹999', desc: 'Our flagship matte navy PVC NFC business card.', items: ['Custom front & back layout', 'Field-level privacy toggles', 'Priority print partner routing'] },
-          { tier: 'Luxury Dark Metal Hybrid', price: '₹1,799', desc: 'Brushed obsidian finish for executive leadership.', items: ['Heavyweight hybrid core', 'Dedicated design verification', 'Pan-India tracked dispatch'] },
+          { tier: 'Minimal Ceramic PVC', price: '₹1,200', desc: 'Crisp matte white or dual-tone PVC NFC card.', items: ['85.6 × 54 mm trim', '18% GST & ₹99 shipping at checkout', 'Instant vCard download'] },
+          { tier: 'Signature Executive Navy', price: '₹1,350', desc: 'Our flagship matte/gloss PVC NFC business card (₹1,200 – ₹1,500 range).', items: ['Custom front & back layout', 'Field-level privacy toggles', 'Priority print partner routing'] },
+          { tier: 'Luxury Dark Metal Hybrid', price: '₹2,000 – ₹2,500', desc: 'Brushed obsidian metal hybrid finish for executive leadership.', items: ['Heavyweight hybrid core', 'Dedicated design verification', 'Pan-India tracked dispatch'] },
         ].map((p) => (
           <div key={p.tier} className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between">
             <div>
@@ -195,7 +197,7 @@ export const NfcGuidePage: React.FC = () => (
   <PublicLayout>
     <section className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16 space-y-8">
       <div>
-        <h1 className="font-display text-3xl font-bold text-[#0B1D3A]">NFC Compatibility & Testing Guide</h1>
+        <h1 className="font-display text-3xl font-bold text-[#0B1D3A]">Smartcard Compatibility & Testing Guide</h1>
         <p className="mt-2 text-slate-600">
           Understanding how NFC tap and QR fallback work across iPhone and Android devices.
         </p>

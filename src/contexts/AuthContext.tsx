@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   onAuthStateChanged,
   signInWithPopup,
@@ -44,97 +44,129 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [userRecord, setUserRecord] = useState<UserRecord | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettingsRecord>(DEFAULT_APP_SETTINGS);
   const [loading, setLoading] = useState(true);
+  const inflightSyncRef = useRef<Map<string, Promise<UserRecord>>>(new Map());
 
   const refreshSettings = useCallback(async () => {
     const s = await getAppSettings();
     setAppSettings(s);
   }, []);
 
-  const syncUserDocument = useCallback(async (fbUser: FirebaseUser): Promise<UserRecord> => {
-    const isBootstrappedSuperAdmin =
-      fbUser.emailVerified && fbUser.email?.toLowerCase() === BOOTSTRAPPED_SUPERADMIN_EMAIL.toLowerCase();
+  const syncUserDocument = useCallback((fbUser: FirebaseUser): Promise<UserRecord> => {
+    const existingFlight = inflightSyncRef.current.get(fbUser.uid);
+    if (existingFlight) return existingFlight;
 
-    const userRef = doc(db, 'users', fbUser.uid);
-    const snap = await getDoc(userRef);
+    const run = (async (): Promise<UserRecord> => {
+      const isBootstrappedSuperAdmin =
+        fbUser.emailVerified && fbUser.email?.toLowerCase() === BOOTSTRAPPED_SUPERADMIN_EMAIL.toLowerCase();
 
-    let resolvedRole: UserRole = isBootstrappedSuperAdmin ? 'SUPERADMIN' : 'USER';
-    let resolvedStatus: UserRecord['status'] = fbUser.emailVerified ? 'Active' : 'Pending Verification';
+      const userRef = doc(db, 'users', fbUser.uid);
+      let snap = await getDoc(userRef);
 
-    // Verify authoritative admin registry if present
-    try {
-      const adminSnap = await getDoc(doc(db, 'admins', fbUser.uid));
-      if (adminSnap.exists() && adminSnap.data()?.active) {
-        resolvedRole = adminSnap.data()?.role as UserRole;
+      let resolvedRole: UserRole = isBootstrappedSuperAdmin ? 'SUPERADMIN' : 'USER';
+      const resolvedStatus: UserRecord['status'] = fbUser.emailVerified ? 'Active' : 'Pending Verification';
+
+      // Verify authoritative admin registry if present
+      try {
+        const adminSnap = await getDoc(doc(db, 'admins', fbUser.uid));
+        if (adminSnap.exists() && adminSnap.data()?.active) {
+          resolvedRole = adminSnap.data()?.role as UserRole;
+        }
+      } catch {
+        // Ignore if not admin
       }
-    } catch {
-      // Ignore if not admin
-    }
 
-    if (!snap.exists()) {
-      const newUser: UserRecord = {
-        uid: fbUser.uid,
-        username: fbUser.email?.split('@')[0] || fbUser.uid.slice(0, 8),
-        email: fbUser.email || '',
-        displayName: fbUser.displayName || fbUser.email?.split('@')[0] || 'Customer',
-        photoURL: fbUser.photoURL || '',
-        role: resolvedRole,
-        status: resolvedStatus,
-        emailVerified: fbUser.emailVerified,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        lastLoginAt: serverTimestamp(),
-      };
-      await setDoc(userRef, newUser);
-      if (isBootstrappedSuperAdmin) {
-        await setDoc(doc(db, 'admins', fbUser.uid), {
+      if (!snap.exists()) {
+        const safeEmail = (fbUser.email || `${fbUser.uid}@users.tapnex.local`).slice(0, 254);
+        const safeUsername = (safeEmail.split('@')[0] || fbUser.uid.slice(0, 8)).slice(0, 64);
+        const safeDisplayName = (fbUser.displayName || safeUsername || 'Customer').slice(0, 120);
+        const safePhotoUrl = fbUser.photoURL && fbUser.photoURL.length <= 2048 ? fbUser.photoURL : '';
+
+        const newUser: UserRecord = {
           uid: fbUser.uid,
-          email: fbUser.email || '',
-          role: 'SUPERADMIN',
-          active: true,
-          permissions: [],
+          username: safeUsername,
+          email: safeEmail,
+          displayName: safeDisplayName,
+          photoURL: safePhotoUrl,
+          role: resolvedRole,
+          status: resolvedStatus,
+          emailVerified: fbUser.emailVerified,
+          createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
-        });
-      }
-      if (fbUser.emailVerified) {
-        await ensureDefaultProfile(newUser);
-        await seedInitialCatalogIfEmpty({ uid: fbUser.uid, email: newUser.email, role: resolvedRole });
-      }
-      return newUser;
-    }
+          lastLoginAt: serverTimestamp(),
+        };
 
-    const existing = snap.data() as UserRecord;
-    const effectiveRole: UserRole = isBootstrappedSuperAdmin ? 'SUPERADMIN' : existing.role;
-    const effectiveStatus =
-      existing.status === 'Blocked' || existing.status === 'Disabled'
-        ? existing.status
-        : fbUser.emailVerified
-          ? 'Active'
-          : 'Pending Verification';
+        try {
+          await setDoc(userRef, newUser);
+        } catch (err) {
+          // If a concurrent login/tab created the doc right before this write, read it instead of failing
+          const retrySnap = await getDoc(userRef).catch(() => null);
+          if (retrySnap && retrySnap.exists()) {
+            snap = retrySnap;
+          } else {
+            throw err;
+          }
+        }
 
-    if (
-      existing.emailVerified !== fbUser.emailVerified ||
-      (existing.status === 'Pending Verification' && fbUser.emailVerified)
-    ) {
-      await updateDoc(userRef, {
+        if (!snap.exists()) {
+          if (isBootstrappedSuperAdmin) {
+            await setDoc(doc(db, 'admins', fbUser.uid), {
+              uid: fbUser.uid,
+              email: safeEmail,
+              role: 'SUPERADMIN',
+              active: true,
+              permissions: [],
+              updatedAt: serverTimestamp(),
+            }).catch(() => null);
+          }
+          if (fbUser.emailVerified) {
+            await ensureDefaultProfile(newUser).catch((err) => {
+              console.warn('Default profile setup warning:', err);
+            });
+            await seedInitialCatalogIfEmpty({ uid: fbUser.uid, email: safeEmail, role: resolvedRole }).catch(() => null);
+          }
+          return newUser;
+        }
+      }
+
+      const existing = snap.data() as UserRecord;
+      const effectiveRole: UserRole = isBootstrappedSuperAdmin ? 'SUPERADMIN' : existing.role;
+      const effectiveStatus =
+        existing.status === 'Blocked' || existing.status === 'Disabled'
+          ? existing.status
+          : fbUser.emailVerified
+            ? 'Active'
+            : 'Pending Verification';
+
+      if (
+        existing.emailVerified !== fbUser.emailVerified ||
+        (existing.status === 'Pending Verification' && fbUser.emailVerified)
+      ) {
+        await updateDoc(userRef, {
+          emailVerified: fbUser.emailVerified,
+          ...(existing.status === 'Pending Verification' && fbUser.emailVerified ? { status: 'Active' } : {}),
+          lastLoginAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        }).catch(() => null);
+      }
+
+      const merged: UserRecord = {
+        ...existing,
+        role: effectiveRole,
+        status: effectiveStatus,
         emailVerified: fbUser.emailVerified,
-        ...(existing.status === 'Pending Verification' && fbUser.emailVerified ? { status: 'Active' } : {}),
-        lastLoginAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      }).catch(() => null);
-    }
+      };
 
-    const merged: UserRecord = {
-      ...existing,
-      role: effectiveRole,
-      status: effectiveStatus,
-      emailVerified: fbUser.emailVerified,
-    };
+      if (fbUser.emailVerified && effectiveStatus === 'Active') {
+        await ensureDefaultProfile(merged).catch(() => null);
+        await seedInitialCatalogIfEmpty({ uid: fbUser.uid, email: merged.email, role: effectiveRole }).catch(() => null);
+      }
+      return merged;
+    })().finally(() => {
+      inflightSyncRef.current.delete(fbUser.uid);
+    });
 
-    if (fbUser.emailVerified && effectiveStatus === 'Active') {
-      await ensureDefaultProfile(merged).catch(() => null);
-      await seedInitialCatalogIfEmpty({ uid: fbUser.uid, email: merged.email, role: effectiveRole }).catch(() => null);
-    }
-    return merged;
+    inflightSyncRef.current.set(fbUser.uid, run);
+    return run;
   }, []);
 
   useEffect(() => {

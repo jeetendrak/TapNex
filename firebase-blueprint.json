@@ -70,6 +70,9 @@
         "visibilitySettings": { "type": "object" },
         "selectedTemplate": { "type": "string", "maxLength": 80 },
         "isPublic": { "type": "boolean" },
+        "adminApproved": { "type": "boolean" },
+        "adminApprovedAt": { "type": "string", "maxLength": 64 },
+        "adminApprovedBy": { "type": "string", "maxLength": 128 },
         "viewsCount": { "type": "number" },
         "qrScansCount": { "type": "number" },
         "nfcVisitsCount": { "type": "number" },
@@ -93,6 +96,9 @@
         "customFields": { "type": "array" },
         "themeColor": { "type": "string", "maxLength": 32 },
         "paymentConfirmed": { "type": "boolean" },
+        "adminApproved": { "type": "boolean" },
+        "adminApprovedAt": { "type": "string", "maxLength": 64 },
+        "adminApprovedBy": { "type": "string", "maxLength": 128 },
         "lastPaidOrderId": { "type": "string", "maxLength": 128 },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -191,7 +197,23 @@
         "paymentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "orderId": { "type": "string", "minLength": 1, "maxLength": 128 },
         "uid": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "gateway": { "type": "string", "enum": ["razorpay_live", "razorpay_sandbox"] },
+        "gateway": {
+          "type": "string",
+          "enum": [
+            "razorpay_live",
+            "razorpay_sandbox",
+            "cashfree_live",
+            "cashfree_sandbox",
+            "easebuzz_live",
+            "easebuzz_sandbox",
+            "payu_live",
+            "payu_sandbox",
+            "gpay_live",
+            "gpay_sandbox",
+            "upi_live",
+            "upi_sandbox"
+          ]
+        },
         "gatewayOrderId": { "type": "string", "maxLength": 128 },
         "gatewayPaymentId": { "type": "string", "maxLength": 128 },
         "signatureVerified": { "type": "boolean" },
@@ -304,6 +326,7 @@
         "taxRatePercent": { "type": "number" },
         "shippingFeeInr": { "type": "number" },
         "inactiveProfileMessage": { "type": "string", "maxLength": 300 },
+        "paymentGateways": { "type": "object" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["settingId", "companyName", "multipleProfilesEnabled", "allowCustomerQrView", "baseCardPriceInr", "taxRatePercent", "shippingFeeInr", "updatedAt"]

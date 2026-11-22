@@ -159,6 +159,9 @@ export interface ProfileRecord {
   visibilitySettings: VisibilitySettings;
   selectedTemplate: string;
   isPublic: boolean;
+  adminApproved?: boolean;
+  adminApprovedAt?: string;
+  adminApprovedBy?: string;
   viewsCount?: number;
   qrScansCount?: number;
   nfcVisitsCount?: number;
@@ -177,6 +180,9 @@ export interface PublicProfileRecord {
   customFields?: CustomFieldItem[];
   themeColor?: string;
   paymentConfirmed?: boolean;
+  adminApproved?: boolean;
+  adminApprovedAt?: string;
+  adminApprovedBy?: string;
   lastPaidOrderId?: string;
   updatedAt: unknown;
 }
@@ -186,6 +192,7 @@ export interface CardTextElement {
   text: string;
   xPct: number; // 0..100 inside trim box
   yPct: number; // 0..100 inside trim box
+  maxWidthPct?: number; // 15..95 wrapping width %
   fontSizePt: number;
   fontFamily: string;
   fontWeight: 'normal' | 'bold';
@@ -193,6 +200,22 @@ export interface CardTextElement {
   textDecoration?: 'none' | 'underline';
   color: string;
   align: 'left' | 'center' | 'right';
+}
+
+export interface CardShapeElement {
+  id: string;
+  kind: 'rect' | 'circle' | 'line' | 'pill';
+  xPct: number;
+  yPct: number;
+  widthPct: number;
+  heightPct: number;
+  color: string;
+  gradientTo?: string;
+  borderRadiusPx?: number;
+  borderColor?: string;
+  borderWidthPx?: number;
+  opacity?: number;
+  rotationDeg?: number;
 }
 
 export interface CardSideDesign {
@@ -205,15 +228,20 @@ export interface CardSideDesign {
   logoWidthMm: number;
   avatarDataUrl?: string;
   showAvatar?: boolean;
+  avatarShape?: 'circle' | 'rounded' | 'square';
   avatarX: number;
   avatarY: number;
   avatarSizeMm?: number;
   showNfcIcon: boolean;
   nfcIconColor: string;
+  nfcX?: number;
+  nfcY?: number;
+  nfcSizeMm?: number;
   showQrSlot: boolean;
   qrSlotX: number; // percentage 0..100
   qrSlotY: number; // percentage 0..100
   qrSizeMm: number;
+  shapes?: CardShapeElement[];
   elements: CardTextElement[];
 }
 
@@ -292,11 +320,45 @@ export interface OrderRecord {
   updatedAt: unknown;
 }
 
+export type PaymentGatewayId =
+  | 'razorpay'
+  | 'cashfree'
+  | 'easebuzz'
+  | 'payu'
+  | 'gpay'
+  | 'upi';
+
+export interface PaymentGatewayConfig {
+  id: PaymentGatewayId;
+  label: string;
+  enabled: boolean;
+  mode: 'sandbox' | 'live';
+  publicKeyId?: string;
+  merchantId?: string;
+  upiId?: string;
+  upiPayeeName?: string;
+  description?: string;
+}
+
+export type PaymentGatewayTransactionMode =
+  | 'razorpay_live'
+  | 'razorpay_sandbox'
+  | 'cashfree_live'
+  | 'cashfree_sandbox'
+  | 'easebuzz_live'
+  | 'easebuzz_sandbox'
+  | 'payu_live'
+  | 'payu_sandbox'
+  | 'gpay_live'
+  | 'gpay_sandbox'
+  | 'upi_live'
+  | 'upi_sandbox';
+
 export interface PaymentRecord {
   paymentId: string;
   orderId: string;
   uid: string;
-  gateway: 'razorpay_live' | 'razorpay_sandbox';
+  gateway: PaymentGatewayTransactionMode;
   gatewayOrderId: string;
   gatewayPaymentId?: string;
   signatureVerified: boolean;
@@ -379,6 +441,7 @@ export interface AppSettingsRecord {
   taxRatePercent: number;
   shippingFeeInr: number;
   inactiveProfileMessage: string;
+  paymentGateways?: Record<PaymentGatewayId, PaymentGatewayConfig>;
   updatedAt: unknown;
 }
 

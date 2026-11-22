@@ -16,19 +16,19 @@ export function resolveCardTokens(text: string, info: Partial<PersonalInformatio
   const fullAddress = [info.businessAddress, info.city, info.state, info.pinCode].filter(Boolean).join(', ');
   return text
     .replace(/\{\{FULL_NAME\}\}/g, info.fullName || 'Your Name')
-    .replace(/\{\{JOB_TITLE\}\}/g, info.jobTitle || 'Designation')
-    .replace(/\{\{COMPANY\}\}/g, info.companyName || 'Company Name')
-    .replace(/\{\{BUSINESS_CATEGORY\}\}/g, info.businessCategory || 'Business Category')
-    .replace(/\{\{SHORT_BIO\}\}/g, info.shortBio || 'Short Biography')
-    .replace(/\{\{MOBILE\}\}/g, info.mobile || '+91 98765 43210')
-    .replace(/\{\{ALTERNATE_MOBILE\}\}/g, info.alternateMobile || '+91 98765 00000')
-    .replace(/\{\{WHATSAPP\}\}/g, info.whatsapp || info.mobile || '+91 98765 43210')
-    .replace(/\{\{EMAIL\}\}/g, info.email || 'name@company.com')
-    .replace(/\{\{ALTERNATE_EMAIL\}\}/g, info.alternateEmail || 'alt@company.com')
-    .replace(/\{\{WEBSITE\}\}/g, info.website || 'www.company.com')
-    .replace(/\{\{CITY_STATE\}\}/g, cityState || 'City, State')
-    .replace(/\{\{ADDRESS\}\}/g, fullAddress || 'Business Address')
-    .replace(/\{\{PERSONAL_ADDRESS\}\}/g, info.personalAddress || 'Personal Address');
+    .replace(/\{\{JOB_TITLE\}\}/g, info.jobTitle || 'Your Designation')
+    .replace(/\{\{COMPANY\}\}/g, info.companyName || 'Your Company Name')
+    .replace(/\{\{BUSINESS_CATEGORY\}\}/g, info.businessCategory || 'Your Business Category')
+    .replace(/\{\{SHORT_BIO\}\}/g, info.shortBio || 'Your Short Bio')
+    .replace(/\{\{MOBILE\}\}/g, info.mobile || 'Your Number')
+    .replace(/\{\{ALTERNATE_MOBILE\}\}/g, info.alternateMobile || 'Your Alternate Number')
+    .replace(/\{\{WHATSAPP\}\}/g, info.whatsapp || info.mobile || 'Your WhatsApp Number')
+    .replace(/\{\{EMAIL\}\}/g, info.email || 'Your Email ID')
+    .replace(/\{\{ALTERNATE_EMAIL\}\}/g, info.alternateEmail || 'Your Alternate Email ID')
+    .replace(/\{\{WEBSITE\}\}/g, info.website || 'Your Website')
+    .replace(/\{\{CITY_STATE\}\}/g, cityState || 'Your City, State')
+    .replace(/\{\{ADDRESS\}\}/g, fullAddress || 'Your Business Address')
+    .replace(/\{\{PERSONAL_ADDRESS\}\}/g, info.personalAddress || 'Your Personal Address');
 }
 
 async function loadImage(src: string): Promise<HTMLImageElement | null> {
@@ -86,6 +86,55 @@ async function renderCardSideToCanvas(params: {
     }
   }
 
+  // 2b. Editable Shape & Accent Elements (positioned relative to trim area)
+  for (const shp of params.side.shapes || []) {
+    const sx = bleedPx + (shp.xPct / 100) * trimPxW;
+    const sy = bleedPx + (shp.yPct / 100) * trimPxH;
+    const sw = (shp.widthPct / 100) * trimPxW;
+    const sh = Math.max(2, (shp.heightPct / 100) * trimPxH);
+    ctx.save();
+    ctx.globalAlpha = shp.opacity ?? 1;
+    if (shp.rotationDeg) {
+      const cx = sx + sw / 2;
+      const cy = sy + sh / 2;
+      ctx.translate(cx, cy);
+      ctx.rotate((shp.rotationDeg * Math.PI) / 180);
+      ctx.translate(-cx, -cy);
+    }
+
+    ctx.beginPath();
+    if (shp.kind === 'circle') {
+      ctx.ellipse(sx + sw / 2, sy + sh / 2, sw / 2, sh / 2, 0, 0, Math.PI * 2);
+    } else if (shp.kind === 'pill') {
+      const r = Math.min(sw, sh) / 2;
+      ctx.roundRect(sx, sy, sw, sh, r);
+    } else if (shp.borderRadiusPx && shp.borderRadiusPx > 0) {
+      const r = Math.min(sw / 2, sh / 2, shp.borderRadiusPx * 2.5);
+      ctx.roundRect(sx, sy, sw, sh, r);
+    } else {
+      ctx.rect(sx, sy, sw, sh);
+    }
+
+    if (shp.color && shp.color !== 'transparent') {
+      if (shp.gradientTo) {
+        const g = ctx.createLinearGradient(sx, sy, sx + sw, sy + sh);
+        g.addColorStop(0, shp.color);
+        g.addColorStop(1, shp.gradientTo);
+        ctx.fillStyle = g;
+      } else {
+        ctx.fillStyle = shp.color;
+      }
+      ctx.fill();
+    }
+
+    if (shp.borderWidthPx && shp.borderWidthPx > 0) {
+      ctx.strokeStyle = shp.borderColor || '#FFFFFF';
+      ctx.lineWidth = Math.max(2, shp.borderWidthPx * 2.5);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   // 3. Logo (positioned relative to trim area)
   if (params.side.logoDataUrl) {
     const logoImg = await loadImage(params.side.logoDataUrl);
@@ -98,32 +147,46 @@ async function renderCardSideToCanvas(params: {
     }
   }
 
-  // 4. Optional Avatar Photo
+  // 4. Optional Avatar Photo (supports circle, rounded, square)
   if (params.side.showAvatar && params.side.avatarDataUrl) {
     const avImg = await loadImage(params.side.avatarDataUrl);
     if (avImg) {
       const ax = bleedPx + (params.side.avatarX / 100) * trimPxW;
       const ay = bleedPx + (params.side.avatarY / 100) * trimPxH;
       const size = mmToPx300Dpi(params.side.avatarSizeMm || 13);
+      const shape = params.side.avatarShape || 'circle';
       ctx.save();
       ctx.beginPath();
-      ctx.arc(ax + size / 2, ay + size / 2, size / 2, 0, Math.PI * 2);
+      if (shape === 'circle') {
+        ctx.arc(ax + size / 2, ay + size / 2, size / 2, 0, Math.PI * 2);
+      } else if (shape === 'rounded') {
+        ctx.roundRect(ax, ay, size, size, size * 0.18);
+      } else {
+        ctx.rect(ax, ay, size, size);
+      }
       ctx.clip();
       ctx.drawImage(avImg, ax, ay, size, size);
       ctx.restore();
     }
   }
 
-  // 5. NFC Contactless Mark (top-right inside safe area)
+  // 5. NFC Contactless Mark (customizable position & scale inside trim area)
   if (params.side.showNfcIcon) {
-    const cx = bleedPx + trimPxW - mmToPx300Dpi(8);
-    const cy = bleedPx + mmToPx300Dpi(8);
+    const cx =
+      params.side.nfcX !== undefined
+        ? bleedPx + (params.side.nfcX / 100) * trimPxW
+        : bleedPx + trimPxW - mmToPx300Dpi(8);
+    const cy =
+      params.side.nfcY !== undefined
+        ? bleedPx + (params.side.nfcY / 100) * trimPxH
+        : bleedPx + mmToPx300Dpi(8);
+    const nfcScale = Math.max(0.5, Math.min(2.5, (params.side.nfcSizeMm || 6) / 6));
     ctx.strokeStyle = params.side.nfcIconColor || '#38BDF8';
-    ctx.lineWidth = Math.max(2, mmToPx300Dpi(0.45));
+    ctx.lineWidth = Math.max(2, mmToPx300Dpi(0.45 * nfcScale));
     ctx.lineCap = 'round';
     for (let i = 1; i <= 3; i++) {
       ctx.beginPath();
-      ctx.arc(cx, cy, mmToPx300Dpi(1.5 * i), -Math.PI * 0.35, Math.PI * 0.35);
+      ctx.arc(cx, cy, mmToPx300Dpi(1.5 * i * nfcScale), -Math.PI * 0.35, Math.PI * 0.35);
       ctx.stroke();
     }
   }
@@ -139,10 +202,11 @@ async function renderCardSideToCanvas(params: {
     ctx.textBaseline = 'top';
     const tx = bleedPx + (el.xPct / 100) * trimPxW;
     const ty = bleedPx + (el.yPct / 100) * trimPxH;
-    ctx.fillText(resolved, tx, ty, trimPxW * 0.84);
+    const maxW = trimPxW * (Math.max(15, Math.min(95, el.maxWidthPct || 84)) / 100);
+    ctx.fillText(resolved, tx, ty, maxW);
     if (el.textDecoration === 'underline') {
       const metrics = ctx.measureText(resolved);
-      const lineW = Math.min(metrics.width, trimPxW * 0.84);
+      const lineW = Math.min(metrics.width, maxW);
       const startX = el.align === 'center' ? tx - lineW / 2 : el.align === 'right' ? tx - lineW : tx;
       ctx.strokeStyle = el.color || '#FFFFFF';
       ctx.lineWidth = Math.max(2, Math.round(fontPx * 0.08));
