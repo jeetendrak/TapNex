@@ -27,7 +27,8 @@ export function mmToPx300Dpi(mm: number): number {
 
 export function resolveCardTokens(text: string, info: Partial<PersonalInformation>): string {
   const cityState = [info.city, info.state].filter(Boolean).join(', ');
-  const fullAddress = [info.businessAddress, info.city, info.state, info.pinCode].filter(Boolean).join(', ');
+  const baseAddress = info.businessAddress || info.personalAddress || '';
+  const fullAddress = [baseAddress, info.city, info.state, info.pinCode].filter(Boolean).join(', ');
   const plainBio = stripHtmlToPlainText(info.shortBio);
   return text
     .replace(/\{\{FULL_NAME\}\}/g, info.fullName || 'Your Name')
@@ -35,15 +36,38 @@ export function resolveCardTokens(text: string, info: Partial<PersonalInformatio
     .replace(/\{\{COMPANY\}\}/g, info.companyName || 'Your Company Name')
     .replace(/\{\{BUSINESS_CATEGORY\}\}/g, info.businessCategory || 'Your Business Category')
     .replace(/\{\{SHORT_BIO\}\}/g, plainBio || 'Your Short Bio')
-    .replace(/\{\{MOBILE\}\}/g, info.mobile || 'Your Number')
+    .replace(/\{\{MOBILE\}\}/g, info.mobile || info.parentMobile || info.ownerMobile || 'Your Number')
     .replace(/\{\{ALTERNATE_MOBILE\}\}/g, info.alternateMobile || 'Your Alternate Number')
-    .replace(/\{\{WHATSAPP\}\}/g, info.whatsapp || info.mobile || 'Your WhatsApp Number')
+    .replace(/\{\{WHATSAPP\}\}/g, info.whatsapp || info.mobile || info.ownerMobile || 'Your WhatsApp Number')
     .replace(/\{\{EMAIL\}\}/g, info.email || 'Your Email ID')
     .replace(/\{\{ALTERNATE_EMAIL\}\}/g, info.alternateEmail || 'Your Alternate Email ID')
     .replace(/\{\{WEBSITE\}\}/g, info.website || 'Your Website')
     .replace(/\{\{CITY_STATE\}\}/g, cityState || 'Your City, State')
-    .replace(/\{\{ADDRESS\}\}/g, fullAddress || 'Your Business Address')
-    .replace(/\{\{PERSONAL_ADDRESS\}\}/g, info.personalAddress || 'Your Personal Address');
+    .replace(/\{\{ADDRESS\}\}/g, fullAddress || 'Your Address')
+    .replace(/\{\{PERSONAL_ADDRESS\}\}/g, info.personalAddress || fullAddress || 'Your Personal Address')
+    .replace(/\{\{BLOOD_GROUP\}\}/g, info.bloodGroup || 'O+')
+    .replace(/\{\{EMERGENCY_NAME\}\}/g, info.emergencyContactName || info.parentName || info.ownerName || 'Emergency Contact')
+    .replace(/\{\{EMERGENCY_RELATION\}\}/g, info.emergencyContactRelation || 'Guardian')
+    .replace(/\{\{EMERGENCY_PHONE\}\}/g, info.emergencyContactPhone || info.parentMobile || info.ownerMobile || info.mobile || 'Emergency Number')
+    .replace(/\{\{DOB\}\}/g, info.dateOfBirth || 'DOB / Age')
+    .replace(/\{\{PARENT_NAME\}\}/g, info.parentName || info.emergencyContactName || 'Parent / Guardian')
+    .replace(/\{\{PARENT_MOBILE\}\}/g, info.parentMobile || info.emergencyContactPhone || info.mobile || 'Parent Number')
+    .replace(/\{\{SCHOOL_CLASS\}\}/g, info.schoolOrClass || 'School / Class')
+    .replace(/\{\{ALLERGIES\}\}/g, info.allergiesOrMedical || 'None specified')
+    .replace(/\{\{SPECIAL_NOTES\}\}/g, info.specialNotes || 'Special Care Notes')
+    .replace(/\{\{PET_TYPE\}\}/g, info.petType || 'Pet')
+    .replace(/\{\{BREED\}\}/g, info.breed || 'Breed')
+    .replace(/\{\{PET_GENDER\}\}/g, info.petGender || 'Gender')
+    .replace(/\{\{PET_COLOR\}\}/g, info.petColor || 'Coat / Color')
+    .replace(/\{\{MICROCHIP_ID\}\}/g, info.microchipId || 'Microchip ID')
+    .replace(/\{\{OWNER_NAME\}\}/g, info.ownerName || 'Owner Name')
+    .replace(/\{\{OWNER_MOBILE\}\}/g, info.ownerMobile || info.mobile || 'Owner Number')
+    .replace(/\{\{VET_NAME\}\}/g, info.vetName || 'Veterinarian')
+    .replace(/\{\{VET_PHONE\}\}/g, info.vetPhone || 'Vet Phone')
+    .replace(/\{\{ITEM_CATEGORY\}\}/g, info.itemCategory || 'Belonging')
+    .replace(/\{\{BRAND_MODEL\}\}/g, info.brandModel || 'Brand / Model')
+    .replace(/\{\{SERIAL_NUMBER\}\}/g, info.serialNumber || 'Serial / ID')
+    .replace(/\{\{FINDER_NOTES\}\}/g, info.finderNotes || 'Please contact owner if found');
 }
 
 async function loadImage(src: string): Promise<HTMLImageElement | null> {

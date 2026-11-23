@@ -20,6 +20,8 @@ import {
   DEFAULT_CARD_TEMPLATES,
   DEFAULT_EMAIL_TEMPLATES,
   DEFAULT_PAYMENT_GATEWAYS,
+  DEFAULT_SHOP_CATEGORIES,
+  DEFAULT_SHOP_PRODUCTS,
   DEFAULT_VISIBILITY,
   EMPTY_PERSONAL_INFO,
   PAYMENT_GATEWAY_ORDER,
@@ -36,6 +38,7 @@ import type {
   EmailTemplateRecord,
   NotificationRecord,
   OrderRecord,
+  OrderShopItem,
   OrderStatus,
   PaymentGatewayConfig,
   PaymentGatewayId,
@@ -44,10 +47,13 @@ import type {
   PersonalInformation,
   PrinterRecord,
   ProfileRecord,
+  ProfileType,
   PublicProfileRecord,
   QrCodeRecord,
   ShippingAddress,
   ShippingRecord,
+  ShopCategoryRecord,
+  ShopProductRecord,
   SocialLinkItem,
   SupportTicketRecord,
   UserRecord,
@@ -64,6 +70,68 @@ export function sanitizeSlug(raw: string): string {
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 60);
+}
+
+export function generateAutoProfileSlug(seedName?: string): string {
+  const base = sanitizeSlug(seedName || '').slice(0, 36).replace(/-+$/, '');
+  const randomSuffix = Math.random().toString(36).replace(/[^a-z0-9]/g, '').slice(0, 5) || '1042x';
+  if (base.length >= 3) {
+    return sanitizeSlug(`${base}-${randomSuffix}`);
+  }
+  return `tpnx-${randomSuffix}${Date.now().toString(36).slice(-3)}`;
+}
+
+export type ReusableProfileFieldKey =
+  | 'address'
+  | 'emergencyContact'
+  | 'parentContact'
+  | 'ownerContact'
+  | 'mobile'
+  | 'alternateMobile'
+  | 'email'
+  | 'website';
+
+export function copyProfileFieldsBySelection(
+  source: Partial<PersonalInformation> | undefined | null,
+  selection: Partial<Record<ReusableProfileFieldKey, boolean>>
+): Partial<PersonalInformation> {
+  if (!source) return {};
+  const copied: Partial<PersonalInformation> = {};
+  if (selection.address) {
+    if (source.businessAddress) copied.businessAddress = source.businessAddress;
+    if (source.personalAddress) copied.personalAddress = source.personalAddress;
+    if (source.city) copied.city = source.city;
+    if (source.state) copied.state = source.state;
+    if (source.pinCode) copied.pinCode = source.pinCode;
+    if (source.country) copied.country = source.country;
+  }
+  if (selection.emergencyContact) {
+    if (source.emergencyContactName) copied.emergencyContactName = source.emergencyContactName;
+    if (source.emergencyContactRelation) copied.emergencyContactRelation = source.emergencyContactRelation;
+    if (source.emergencyContactPhone) copied.emergencyContactPhone = source.emergencyContactPhone;
+  }
+  if (selection.parentContact) {
+    copied.parentName = source.parentName || source.fullName || '';
+    copied.parentMobile = source.parentMobile || source.mobile || '';
+  }
+  if (selection.ownerContact) {
+    copied.ownerName = source.ownerName || source.fullName || '';
+    copied.ownerMobile = source.ownerMobile || source.mobile || '';
+  }
+  if (selection.mobile && source.mobile) {
+    copied.mobile = source.mobile;
+    if (source.whatsapp) copied.whatsapp = source.whatsapp;
+  }
+  if (selection.alternateMobile && source.alternateMobile) {
+    copied.alternateMobile = source.alternateMobile;
+  }
+  if (selection.email && source.email) {
+    copied.email = source.email;
+  }
+  if (selection.website && source.website) {
+    copied.website = source.website;
+  }
+  return copied;
 }
 
 export function extractTimestampMs(val: unknown): number {
@@ -149,18 +217,56 @@ export function maskEmail(email?: string): string {
 export function calculateProfileCompletion(profile: ProfileRecord | null): number {
   if (!profile) return 0;
   const info = profile.personalInformation;
-  const checks = [
-    Boolean(info.fullName),
-    Boolean(info.jobTitle),
-    Boolean(info.companyName),
-    Boolean(info.shortBio),
-    Boolean(info.mobile),
-    Boolean(info.email),
-    Boolean(info.city && info.state),
-    Boolean(info.photoDataUrl),
-    profile.socialLinks.filter((s) => s.enabled && s.url).length > 0,
-    Boolean(profile.slug),
-  ];
+  const pType: ProfileType = profile.profileType || 'adult';
+
+  let checks: boolean[];
+  if (pType === 'kids') {
+    checks = [
+      Boolean(info.photoDataUrl),
+      Boolean(info.fullName),
+      Boolean(info.parentName),
+      Boolean(info.parentMobile),
+      Boolean(info.emergencyContactPhone || info.emergencyContactName),
+      Boolean(info.bloodGroup),
+      Boolean(info.city && info.state),
+      Boolean(profile.slug),
+    ];
+  } else if (pType === 'pets') {
+    checks = [
+      Boolean(info.photoDataUrl),
+      Boolean(info.fullName),
+      Boolean(info.petType),
+      Boolean(info.breed),
+      Boolean(info.ownerName),
+      Boolean(info.ownerMobile),
+      Boolean(info.city && info.state),
+      Boolean(profile.slug),
+    ];
+  } else if (pType === 'belongings') {
+    checks = [
+      Boolean(info.photoDataUrl),
+      Boolean(info.fullName),
+      Boolean(info.itemCategory),
+      Boolean(info.ownerName),
+      Boolean(info.ownerMobile),
+      Boolean(info.finderNotes || info.brandModel),
+      Boolean(info.city && info.state),
+      Boolean(profile.slug),
+    ];
+  } else {
+    checks = [
+      Boolean(info.fullName),
+      Boolean(info.jobTitle),
+      Boolean(info.companyName),
+      Boolean(info.shortBio),
+      Boolean(info.mobile),
+      Boolean(info.email),
+      Boolean(info.city && info.state),
+      Boolean(info.photoDataUrl),
+      profile.socialLinks.filter((s) => s.enabled && s.url).length > 0,
+      Boolean(profile.slug),
+    ];
+  }
   return Math.round((checks.filter(Boolean).length / checks.length) * 100);
 }
 
@@ -174,12 +280,14 @@ export function buildSanitizedPublicProfile(
 ): Omit<PublicProfileRecord, 'updatedAt'> {
   const v = profile.visibilitySettings;
   const info = profile.personalInformation;
+  const profileType: ProfileType = profile.profileType || 'adult';
 
   if (!profile.isPublic || profile.adminDisabled) {
     return {
       slug: profile.slug,
       profileId: profile.profileId,
       uid: profile.uid,
+      profileType,
       isPublic: Boolean(profile.isPublic),
       ...(profile.adminDisabled ? { adminDisabled: true } : {}),
       unavailableMessage: profile.adminDisabled
@@ -191,9 +299,6 @@ export function buildSanitizedPublicProfile(
   const publicInfo: Partial<PersonalInformation> = {};
   if (v.photo && info.photoDataUrl) publicInfo.photoDataUrl = info.photoDataUrl;
   if (v.fullName && info.fullName) publicInfo.fullName = info.fullName;
-  if (v.jobTitle && info.jobTitle) publicInfo.jobTitle = info.jobTitle;
-  if (v.companyName && info.companyName) publicInfo.companyName = info.companyName;
-  if (v.businessCategory && info.businessCategory) publicInfo.businessCategory = info.businessCategory;
   if (v.shortBio && info.shortBio) publicInfo.shortBio = sanitizeRichBioHtml(info.shortBio);
   if (v.mobile && info.mobile) publicInfo.mobile = info.mobile;
   if (v.alternateMobile && info.alternateMobile) publicInfo.alternateMobile = info.alternateMobile;
@@ -201,7 +306,18 @@ export function buildSanitizedPublicProfile(
   if (v.email && info.email) publicInfo.email = info.email;
   if (v.alternateEmail && info.alternateEmail) publicInfo.alternateEmail = info.alternateEmail;
   if (v.website && info.website) publicInfo.website = info.website;
-  if (v.businessAddress) {
+
+  // Adult professional & ID fields (strictly excluded from kids / pets / belongings profiles)
+  if (profileType === 'adult') {
+    if (v.jobTitle && info.jobTitle) publicInfo.jobTitle = info.jobTitle;
+    if (v.companyName && info.companyName) publicInfo.companyName = info.companyName;
+    if (v.businessCategory && info.businessCategory) publicInfo.businessCategory = info.businessCategory;
+    if (v.aadhaarNumber && info.aadhaarNumber) publicInfo.aadhaarNumber = info.aadhaarNumber;
+    if (v.panNumber && info.panNumber) publicInfo.panNumber = info.panNumber;
+  }
+
+  // Address fields
+  if (v.businessAddress || (profileType !== 'adult' && v.personalAddress)) {
     if (info.businessAddress) publicInfo.businessAddress = info.businessAddress;
     if (info.city) publicInfo.city = info.city;
     if (info.state) publicInfo.state = info.state;
@@ -210,6 +326,71 @@ export function buildSanitizedPublicProfile(
   }
   if (v.personalAddress && info.personalAddress) {
     publicInfo.personalAddress = info.personalAddress;
+  }
+
+  // Shared emergency & blood group fields
+  if (profileType === 'adult' || profileType === 'kids') {
+    if ((v.bloodGroup ?? true) && info.bloodGroup) publicInfo.bloodGroup = info.bloodGroup;
+  }
+  if (profileType === 'adult' || profileType === 'kids' || profileType === 'pets' || profileType === 'belongings') {
+    if (v.emergencyContact ?? true) {
+      if (info.emergencyContactName) publicInfo.emergencyContactName = info.emergencyContactName;
+      if (info.emergencyContactRelation) publicInfo.emergencyContactRelation = info.emergencyContactRelation;
+      if (info.emergencyContactPhone) publicInfo.emergencyContactPhone = info.emergencyContactPhone;
+    }
+  }
+
+  // Kids fields
+  if (profileType === 'kids') {
+    if ((v.dateOfBirth ?? true) && info.dateOfBirth) publicInfo.dateOfBirth = info.dateOfBirth;
+    if (v.parentContact ?? true) {
+      if (info.parentName) publicInfo.parentName = info.parentName;
+      if (info.parentMobile) publicInfo.parentMobile = info.parentMobile;
+    }
+    if ((v.schoolOrClass ?? true) && info.schoolOrClass) publicInfo.schoolOrClass = info.schoolOrClass;
+    if (v.medicalInfo ?? true) {
+      if (info.allergiesOrMedical) publicInfo.allergiesOrMedical = info.allergiesOrMedical;
+      if (info.specialNotes) publicInfo.specialNotes = info.specialNotes;
+    }
+  }
+
+  // Pets fields
+  if (profileType === 'pets') {
+    if (v.petDetails ?? true) {
+      if (info.petType) publicInfo.petType = info.petType;
+      if (info.breed) publicInfo.breed = info.breed;
+      if (info.petGender) publicInfo.petGender = info.petGender;
+      if (info.petColor) publicInfo.petColor = info.petColor;
+      if (info.microchipId) publicInfo.microchipId = info.microchipId;
+      if (info.dateOfBirth) publicInfo.dateOfBirth = info.dateOfBirth;
+    }
+    if (v.ownerContact ?? true) {
+      if (info.ownerName) publicInfo.ownerName = info.ownerName;
+      if (info.ownerMobile) publicInfo.ownerMobile = info.ownerMobile;
+    }
+    if (v.vetContact ?? true) {
+      if (info.vetName) publicInfo.vetName = info.vetName;
+      if (info.vetPhone) publicInfo.vetPhone = info.vetPhone;
+    }
+    if ((v.medicalInfo ?? true) && info.allergiesOrMedical) {
+      publicInfo.allergiesOrMedical = info.allergiesOrMedical;
+    }
+  }
+
+  // Personal Belongings fields
+  if (profileType === 'belongings') {
+    if (v.itemDetails ?? true) {
+      if (info.itemCategory) publicInfo.itemCategory = info.itemCategory;
+      if (info.brandModel) publicInfo.brandModel = info.brandModel;
+      if (info.serialNumber) publicInfo.serialNumber = info.serialNumber;
+    }
+    if (v.ownerContact ?? true) {
+      if (info.ownerName) publicInfo.ownerName = info.ownerName;
+      if (info.ownerMobile) publicInfo.ownerMobile = info.ownerMobile;
+    }
+    if ((v.finderNotes ?? true) && info.finderNotes) {
+      publicInfo.finderNotes = info.finderNotes;
+    }
   }
 
   const publicSocials: SocialLinkItem[] = (profile.socialLinks || [])
@@ -228,6 +409,7 @@ export function buildSanitizedPublicProfile(
     slug: profile.slug,
     profileId: profile.profileId,
     uid: profile.uid,
+    profileType,
     isPublic: true,
     personalInformation: publicInfo,
     socialLinks: publicSocials,
@@ -377,6 +559,26 @@ export async function isSlugAvailable(slug: string, currentProfileId?: string): 
   }
 }
 
+export async function ensureUniqueAutoProfileSlug(
+  seedName?: string,
+  excludeProfileId?: string
+): Promise<string> {
+  for (let i = 0; i < 4; i++) {
+    const candidate = generateAutoProfileSlug(seedName);
+    if (await isSlugAvailable(candidate, excludeProfileId)) {
+      return candidate;
+    }
+  }
+  return `tpnx-${Date.now().toString(36)}`;
+}
+
+function defaultTemplateForProfileType(profileType: ProfileType): string {
+  if (profileType === 'kids') return 'kids-safety-sky';
+  if (profileType === 'pets') return 'pets-collar-emerald';
+  if (profileType === 'belongings') return 'belongings-finder-amber';
+  return 'azure-tech-waves';
+}
+
 export async function ensureDefaultProfile(user: UserRecord): Promise<ProfileRecord> {
   const existing = await getUserProfiles(user.uid);
   if (existing.length > 0) return existing[0];
@@ -395,6 +597,7 @@ export async function ensureDefaultProfile(user: UserRecord): Promise<ProfileRec
   const newProfile: ProfileRecord = {
     profileId,
     uid: user.uid,
+    profileType: 'adult',
     profileLabel: 'Primary Business Profile',
     slug,
     personalInformation: {
@@ -406,7 +609,7 @@ export async function ensureDefaultProfile(user: UserRecord): Promise<ProfileRec
     socialLinks: [],
     customFields: [],
     visibilitySettings: DEFAULT_VISIBILITY,
-    selectedTemplate: 'premium-navy',
+    selectedTemplate: 'azure-tech-waves',
     isPublic: true,
     viewsCount: 0,
     qrScansCount: 0,
@@ -432,24 +635,28 @@ export async function ensureDefaultProfile(user: UserRecord): Promise<ProfileRec
 export async function createAdditionalProfile(
   uid: string,
   label: string,
-  desiredSlug: string,
-  baseInfo?: Partial<PersonalInformation>
+  desiredSlug?: string,
+  baseInfo?: Partial<PersonalInformation>,
+  profileType: ProfileType = 'adult'
 ): Promise<ProfileRecord> {
-  const cleanSlug = sanitizeSlug(desiredSlug);
-  if (!(await isSlugAvailable(cleanSlug))) {
-    throw new Error('This profile slug is already taken.');
-  }
+  const candidateSlug = desiredSlug ? sanitizeSlug(desiredSlug) : '';
+  const cleanSlug =
+    candidateSlug.length >= 3 && (await isSlugAvailable(candidateSlug))
+      ? candidateSlug
+      : await ensureUniqueAutoProfileSlug(baseInfo?.fullName || label);
+
   const profileId = `prof_${uid.slice(0, 8)}_${Date.now()}`;
   const profile: ProfileRecord = {
     profileId,
     uid,
-    profileLabel: label.slice(0, 80),
+    profileType,
+    profileLabel: label.slice(0, 80) || 'Digital Profile',
     slug: cleanSlug,
     personalInformation: { ...EMPTY_PERSONAL_INFO, ...baseInfo },
     socialLinks: [],
     customFields: [],
     visibilitySettings: DEFAULT_VISIBILITY,
-    selectedTemplate: 'premium-navy',
+    selectedTemplate: defaultTemplateForProfileType(profileType),
     isPublic: true,
     viewsCount: 0,
     qrScansCount: 0,
@@ -544,6 +751,7 @@ export async function saveProfileAndSyncPublic(
   batch.set(
     doc(db, 'profiles', profile.profileId),
     {
+      profileType: updatedProfile.profileType || 'adult',
       profileLabel: updatedProfile.profileLabel || 'Primary Business Profile',
       slug: cleanSlug,
       personalInformation: updatedProfile.personalInformation,
@@ -865,6 +1073,7 @@ function toFirestoreCardTemplate(t: CardTemplateRecord): Omit<CardTemplateRecord
     templateId: t.templateId,
     name: t.name,
     category: t.category || 'Executive',
+    profileType: t.profileType || 'adult',
     description: t.description || '',
     priceInr: Math.max(0, Number(t.priceInr) || 0),
     cardType: t.cardType || 'Matte PVC SMART',
@@ -1236,6 +1445,54 @@ export async function createPendingOrder(params: {
 
   try {
     await batch.commit();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, `orders/${params.orderId}`);
+  }
+}
+
+export async function createPendingShopOrder(params: {
+  orderId: string;
+  orderNumber: string;
+  uid: string;
+  profileId?: string;
+  profileSlug?: string;
+  shopItems: OrderShopItem[];
+  quantity: number;
+  cardType: string;
+  subtotal: number;
+  tax: number;
+  shipping: number;
+  total: number;
+  shippingAddress: ShippingAddress;
+  notes?: string;
+}): Promise<void> {
+  try {
+    await setDoc(doc(db, 'orders', params.orderId), {
+      orderId: params.orderId,
+      orderNumber: params.orderNumber,
+      uid: params.uid,
+      profileId: params.profileId || 'shop_cart',
+      profileSlug: params.profileSlug || '',
+      designId: 'shop_direct',
+      orderSource: 'shop',
+      shopItems: params.shopItems,
+      printerId: '',
+      quantity: Math.max(1, Number(params.quantity) || 1),
+      cardType: params.cardType.slice(0, 80) || 'TapNex Smart Tag Order',
+      subtotal: params.subtotal,
+      tax: params.tax,
+      shipping: params.shipping,
+      total: params.total,
+      currency: 'INR',
+      paymentStatus: 'Pending',
+      orderStatus: 'Awaiting Payment',
+      shippingAddress: params.shippingAddress,
+      qrCodeId: '',
+      printFileReady: false,
+      ...(params.notes ? { internalNotes: params.notes.slice(0, 1800) } : {}),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, `orders/${params.orderId}`);
   }
@@ -2399,6 +2656,219 @@ export async function sendAndLogTransactionalEmail(params: {
   return { delivered, mode };
 }
 
+// --- Shop Categories & Products ---
+export async function getShopCategories(includeInactive = false): Promise<ShopCategoryRecord[]> {
+  try {
+    const snap = await getDocs(collection(db, 'shopCategories'));
+    const list = snap.empty
+      ? DEFAULT_SHOP_CATEGORIES
+      : snap.docs.map((d) => d.data() as ShopCategoryRecord);
+    const sorted = [...list].sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99) || a.name.localeCompare(b.name));
+    return includeInactive ? sorted : sorted.filter((c) => c.active);
+  } catch {
+    const sorted = [...DEFAULT_SHOP_CATEGORIES].sort((a, b) => a.sortOrder - b.sortOrder);
+    return includeInactive ? sorted : sorted.filter((c) => c.active);
+  }
+}
+
+export async function saveShopCategory(
+  cat: ShopCategoryRecord,
+  actor: { uid: string; email?: string; role: UserRole }
+): Promise<void> {
+  const path = `shopCategories/${cat.categoryId}`;
+  try {
+    await setDoc(doc(db, 'shopCategories', cat.categoryId), {
+      categoryId: cat.categoryId,
+      name: cat.name.trim(),
+      slug: sanitizeSlug(cat.slug || cat.name) || cat.categoryId,
+      description: (cat.description || '').trim(),
+      active: Boolean(cat.active),
+      sortOrder: Number(cat.sortOrder) || 1,
+      updatedAt: serverTimestamp(),
+    });
+    await recordAuditLog({
+      actorUid: actor.uid,
+      actorEmail: actor.email,
+      actorRole: actor.role,
+      action: 'SAVE_SHOP_CATEGORY',
+      targetCollection: 'shopCategories',
+      targetId: cat.categoryId,
+      details: `Saved shop category "${cat.name}" (active=${cat.active})`,
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteShopCategory(
+  categoryId: string,
+  actor: { uid: string; email?: string; role: UserRole }
+): Promise<void> {
+  try {
+    const existingSnap = await getDocs(collection(db, 'shopCategories'));
+    if (existingSnap.empty) {
+      const batch = writeBatch(db);
+      for (const def of DEFAULT_SHOP_CATEGORIES) {
+        if (def.categoryId !== categoryId) {
+          batch.set(doc(db, 'shopCategories', def.categoryId), {
+            ...def,
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+      await batch.commit();
+    } else {
+      await deleteDoc(doc(db, 'shopCategories', categoryId));
+    }
+    await recordAuditLog({
+      actorUid: actor.uid,
+      actorEmail: actor.email,
+      actorRole: actor.role,
+      action: 'DELETE_SHOP_CATEGORY',
+      targetCollection: 'shopCategories',
+      targetId: categoryId,
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `shopCategories/${categoryId}`);
+  }
+}
+
+export async function getShopProducts(includeHidden = false): Promise<ShopProductRecord[]> {
+  try {
+    const snap = await getDocs(collection(db, 'shopProducts'));
+    const list = snap.empty
+      ? DEFAULT_SHOP_PRODUCTS
+      : snap.docs.map((d) => d.data() as ShopProductRecord);
+    const sorted = [...list].sort(
+      (a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99) || a.name.localeCompare(b.name)
+    );
+    return includeHidden ? sorted : sorted.filter((p) => p.visibleOnShop);
+  } catch {
+    const sorted = [...DEFAULT_SHOP_PRODUCTS].sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+    return includeHidden ? sorted : sorted.filter((p) => p.visibleOnShop);
+  }
+}
+
+export async function saveShopProduct(
+  product: ShopProductRecord,
+  actor: { uid: string; email?: string; role: UserRole }
+): Promise<void> {
+  const path = `shopProducts/${product.productId}`;
+  try {
+    const existingSnap = await getDocs(collection(db, 'shopProducts'));
+    if (existingSnap.empty) {
+      const batch = writeBatch(db);
+      for (const def of DEFAULT_SHOP_PRODUCTS) {
+        batch.set(doc(db, 'shopProducts', def.productId), {
+          ...def,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+      await batch.commit();
+    }
+
+    await setDoc(doc(db, 'shopProducts', product.productId), {
+      productId: product.productId,
+      name: product.name.trim(),
+      slug: sanitizeSlug(product.slug || product.name) || product.productId,
+      categoryId: product.categoryId,
+      categoryName: product.categoryName || '',
+      shortDescription: (product.shortDescription || '').trim(),
+      description: (product.description || '').trim(),
+      features: (product.features || []).map((f) => f.trim()).filter(Boolean).slice(0, 20),
+      priceInr: Math.max(0, Number(product.priceInr) || 0),
+      compareAtPriceInr: Math.max(0, Number(product.compareAtPriceInr) || 0),
+      cardType: (product.cardType || product.categoryName || 'Smart Tag').trim(),
+      imageDataUrl: product.imageDataUrl || '',
+      badgeText: (product.badgeText || '').trim(),
+      visibleOnShop: Boolean(product.visibleOnShop),
+      featured: Boolean(product.featured),
+      inStock: product.inStock !== false,
+      sortOrder: Number(product.sortOrder) || 1,
+      createdAt: product.createdAt || serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    await recordAuditLog({
+      actorUid: actor.uid,
+      actorEmail: actor.email,
+      actorRole: actor.role,
+      action: 'SAVE_SHOP_PRODUCT',
+      targetCollection: 'shopProducts',
+      targetId: product.productId,
+      details: `Saved product "${product.name}" (₹${product.priceInr}, visibleOnShop=${product.visibleOnShop})`,
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteShopProduct(
+  productId: string,
+  actor: { uid: string; email?: string; role: UserRole }
+): Promise<void> {
+  try {
+    const existingSnap = await getDocs(collection(db, 'shopProducts'));
+    if (existingSnap.empty) {
+      const batch = writeBatch(db);
+      for (const def of DEFAULT_SHOP_PRODUCTS) {
+        if (def.productId !== productId) {
+          batch.set(doc(db, 'shopProducts', def.productId), {
+            ...def,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+      await batch.commit();
+    } else {
+      await deleteDoc(doc(db, 'shopProducts', productId));
+    }
+    await recordAuditLog({
+      actorUid: actor.uid,
+      actorEmail: actor.email,
+      actorRole: actor.role,
+      action: 'DELETE_SHOP_PRODUCT',
+      targetCollection: 'shopProducts',
+      targetId: productId,
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `shopProducts/${productId}`);
+  }
+}
+
+export async function seedInitialShopIfEmpty(actor: {
+  uid: string;
+  email?: string;
+  role: UserRole;
+}): Promise<void> {
+  if (actor.role !== 'SUPERADMIN' && actor.role !== 'ADMIN') return;
+  try {
+    const catSnap = await getDocs(collection(db, 'shopCategories'));
+    if (catSnap.empty) {
+      const batch = writeBatch(db);
+      for (const c of DEFAULT_SHOP_CATEGORIES) {
+        batch.set(doc(db, 'shopCategories', c.categoryId), { ...c, updatedAt: serverTimestamp() });
+      }
+      await batch.commit();
+    }
+    const prodSnap = await getDocs(collection(db, 'shopProducts'));
+    if (prodSnap.empty) {
+      const batch = writeBatch(db);
+      for (const p of DEFAULT_SHOP_PRODUCTS) {
+        batch.set(doc(db, 'shopProducts', p.productId), {
+          ...p,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+      await batch.commit();
+    }
+  } catch {
+    // ignore if already present
+  }
+}
+
 export async function seedInitialCatalogIfEmpty(actor: {
   uid: string;
   email?: string;
@@ -2410,10 +2880,14 @@ export async function seedInitialCatalogIfEmpty(actor: {
     if (tplSnap.empty) {
       const batch = writeBatch(db);
       for (const t of DEFAULT_CARD_TEMPLATES) {
-        batch.set(doc(db, 'cardTemplates', t.templateId), { ...t, updatedAt: serverTimestamp() });
+        batch.set(doc(db, 'cardTemplates', t.templateId), {
+          ...toFirestoreCardTemplate(t),
+          updatedAt: serverTimestamp(),
+        });
       }
       await batch.commit();
     }
+    await seedInitialShopIfEmpty(actor);
     if (actor.role === 'SUPERADMIN') {
       const settingsSnap = await getDoc(doc(db, 'appSettings', 'global'));
       if (!settingsSnap.exists()) {
@@ -2532,7 +3006,7 @@ export async function resetApplicationToFreshBlank(
   }
 
   if (restoreDefaultCatalog) {
-    for (const catalogCol of ['cardTemplates', 'emailTemplates', 'appSettings'] as const) {
+    for (const catalogCol of ['cardTemplates', 'emailTemplates', 'appSettings', 'shopCategories', 'shopProducts'] as const) {
       try {
         deletedCounts[catalogCol] = await deleteCollectionDocsInBatches(catalogCol);
       } catch (err) {
@@ -2548,13 +3022,26 @@ export async function resetApplicationToFreshBlank(
       const seedBatch = writeBatch(db);
       for (const tpl of DEFAULT_CARD_TEMPLATES) {
         seedBatch.set(doc(db, 'cardTemplates', tpl.templateId), {
-          ...tpl,
+          ...toFirestoreCardTemplate(tpl),
           updatedAt: serverTimestamp(),
         });
       }
       for (const emailTpl of DEFAULT_EMAIL_TEMPLATES) {
         seedBatch.set(doc(db, 'emailTemplates', emailTpl.templateId), {
           ...emailTpl,
+          updatedAt: serverTimestamp(),
+        });
+      }
+      for (const cat of DEFAULT_SHOP_CATEGORIES) {
+        seedBatch.set(doc(db, 'shopCategories', cat.categoryId), {
+          ...cat,
+          updatedAt: serverTimestamp(),
+        });
+      }
+      for (const prod of DEFAULT_SHOP_PRODUCTS) {
+        seedBatch.set(doc(db, 'shopProducts', prod.productId), {
+          ...prod,
+          createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
       }

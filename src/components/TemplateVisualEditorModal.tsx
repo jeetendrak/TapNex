@@ -34,6 +34,7 @@ import type {
   CardTemplateRecord,
   CardTextElement,
   PersonalInformation,
+  ProfileType,
 } from '../types';
 
 const TEMPLATE_FONTS = [
@@ -48,15 +49,37 @@ const TEMPLATE_FONTS = [
   { label: 'Courier New (System Mono)', value: 'Courier New, monospace' },
 ];
 
-const QUICK_TOKENS: { label: string; token: string; fontSizePt: number; bold?: boolean }[] = [
-  { label: 'Full Name', token: '{{FULL_NAME}}', fontSizePt: 13, bold: true },
-  { label: 'Job Title', token: '{{JOB_TITLE}}', fontSizePt: 8.5 },
-  { label: 'Company', token: '{{COMPANY}}', fontSizePt: 8.5, bold: true },
+const QUICK_TOKENS: {
+  label: string;
+  token: string;
+  fontSizePt: number;
+  bold?: boolean;
+  types?: ('all' | ProfileType)[];
+}[] = [
+  { label: 'Full / Pet / Child Name', token: '{{FULL_NAME}}', fontSizePt: 13, bold: true },
+  { label: 'Job Title', token: '{{JOB_TITLE}}', fontSizePt: 8.5, types: ['all', 'adult'] },
+  { label: 'Company', token: '{{COMPANY}}', fontSizePt: 8.5, bold: true, types: ['all', 'adult'] },
   { label: 'Mobile', token: '{{MOBILE}}', fontSizePt: 8 },
-  { label: 'Email', token: '{{EMAIL}}', fontSizePt: 8 },
-  { label: 'Website', token: '{{WEBSITE}}', fontSizePt: 7.5 },
-  { label: 'Category', token: '{{BUSINESS_CATEGORY}}', fontSizePt: 8 },
+  { label: 'Email', token: '{{EMAIL}}', fontSizePt: 8, types: ['all', 'adult', 'belongings'] },
+  { label: 'Website', token: '{{WEBSITE}}', fontSizePt: 7.5, types: ['all', 'adult'] },
+  { label: 'Category', token: '{{BUSINESS_CATEGORY}}', fontSizePt: 8, types: ['all', 'adult'] },
   { label: 'City / State', token: '{{CITY_STATE}}', fontSizePt: 7.5 },
+  { label: 'Blood Group', token: '{{BLOOD_GROUP}}', fontSizePt: 8.5, bold: true, types: ['all', 'adult', 'kids'] },
+  { label: 'Emergency Phone', token: '{{EMERGENCY_PHONE}}', fontSizePt: 8, types: ['all', 'adult', 'kids'] },
+  { label: 'Parent Name', token: '{{PARENT_NAME}}', fontSizePt: 8.5, bold: true, types: ['all', 'kids'] },
+  { label: 'Parent Mobile', token: '{{PARENT_MOBILE}}', fontSizePt: 8.5, types: ['all', 'kids'] },
+  { label: 'School / Class', token: '{{SCHOOL_CLASS}}', fontSizePt: 8, types: ['all', 'kids'] },
+  { label: 'Allergies / Medical', token: '{{ALLERGIES}}', fontSizePt: 7.5, types: ['all', 'kids', 'pets'] },
+  { label: 'Pet Type', token: '{{PET_TYPE}}', fontSizePt: 8.5, types: ['all', 'pets'] },
+  { label: 'Breed', token: '{{BREED}}', fontSizePt: 8, types: ['all', 'pets'] },
+  { label: 'Microchip ID', token: '{{MICROCHIP_ID}}', fontSizePt: 7.5, types: ['all', 'pets'] },
+  { label: 'Owner Name', token: '{{OWNER_NAME}}', fontSizePt: 8.5, bold: true, types: ['all', 'pets'] },
+  { label: 'Owner Mobile', token: '{{OWNER_MOBILE}}', fontSizePt: 8.5, types: ['all', 'pets'] },
+  { label: 'Vet Phone', token: '{{VET_PHONE}}', fontSizePt: 8, types: ['all', 'pets'] },
+  { label: 'Item Category', token: '{{ITEM_CATEGORY}}', fontSizePt: 8.5, types: ['all', 'belongings'] },
+  { label: 'Brand / Model', token: '{{BRAND_MODEL}}', fontSizePt: 8.5, types: ['all', 'belongings'] },
+  { label: 'Serial / Tag ID', token: '{{SERIAL_NUMBER}}', fontSizePt: 7.5, types: ['all', 'belongings'] },
+  { label: 'Finder Notes', token: '{{FINDER_NOTES}}', fontSizePt: 7.5, types: ['all', 'belongings'] },
 ];
 
 const SAMPLE_PREVIEW_PERSONA: Partial<PersonalInformation> = {
@@ -247,6 +270,7 @@ export const TemplateVisualEditorModal: React.FC<TemplateVisualEditorModalProps>
         priceInr: Math.max(0, Number(draft.priceInr) || 0),
         cardType: (draft.cardType || 'Matte PVC SMART').trim().slice(0, 80),
         category: (draft.category || 'Executive').trim().slice(0, 60),
+        profileType: draft.profileType || 'all',
         description: (draft.description || '').trim().slice(0, 400),
       };
       await onSave(cleaned);
@@ -581,7 +605,13 @@ export const TemplateVisualEditorModal: React.FC<TemplateVisualEditorModalProps>
                     </button>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
-                    {QUICK_TOKENS.map((t) => (
+                    {QUICK_TOKENS.filter(
+                      (t) =>
+                        !draft.profileType ||
+                        draft.profileType === 'all' ||
+                        !t.types ||
+                        t.types.includes(draft.profileType)
+                    ).map((t) => (
                       <button
                         key={t.token}
                         type="button"
@@ -920,7 +950,7 @@ export const TemplateVisualEditorModal: React.FC<TemplateVisualEditorModalProps>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">Card Type / Finish</label>
                     <input
@@ -940,6 +970,22 @@ export const TemplateVisualEditorModal: React.FC<TemplateVisualEditorModalProps>
                       onChange={(e) => setDraft({ ...draft, category: e.target.value })}
                       className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
                     />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Target Profile Type</label>
+                    <select
+                      value={draft.profileType || 'all'}
+                      onChange={(e) =>
+                        setDraft({ ...draft, profileType: e.target.value as 'all' | ProfileType })
+                      }
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+                    >
+                      <option value="all">All Profile Types</option>
+                      <option value="adult">Adult / Business</option>
+                      <option value="kids">Kids Safety</option>
+                      <option value="pets">Pets Recovery</option>
+                      <option value="belongings">Personal Belongings</option>
+                    </select>
                   </div>
                 </div>
 

@@ -95,7 +95,12 @@ import { sanitizeRichBioHtml } from '../../lib/richText';
 import { exportRowsToCsv, exportRowsToExcel } from '../../lib/exportUtils';
 import { downloadBlob, generateCardSidePngBlob, generatePrintReadyPdfBlob } from '../../lib/printPdf';
 import { compressImageFileToDataUrl, generatePrinterAuthId } from '../../lib/qrArtwork';
-import { DEFAULT_CARD_TEMPLATES, INDIAN_STATES, ORDER_STATUS_FLOW } from '../../lib/constants';
+import {
+  DEFAULT_CARD_TEMPLATES,
+  INDIAN_STATES,
+  ORDER_STATUS_FLOW,
+  PROFILE_TYPE_OPTIONS,
+} from '../../lib/constants';
 import type {
   AuditLogRecord,
   CardDesignRecord,
@@ -108,6 +113,7 @@ import type {
   PersonalInformation,
   PrinterRecord,
   ProfileRecord,
+  ProfileType,
   QrCodeRecord,
   ShippingAddress,
   ShippingRecord,
@@ -200,26 +206,72 @@ const AdminProfileInspectorModal: React.FC<{
   const [busy, setBusy] = useState(false);
   const info = profile.personalInformation || ({} as PersonalInformation);
   const vis = profile.visibilitySettings;
+  const pType: ProfileType = profile.profileType || 'adult';
+  const pTypeMeta = PROFILE_TYPE_OPTIONS.find((t) => t.id === pType) || PROFILE_TYPE_OPTIONS[0];
 
-  const detailRows: { label: string; value?: string; visible: boolean }[] = [
-    { label: 'Full Name', value: info.fullName, visible: vis.fullName },
-    { label: 'Job Title', value: info.jobTitle, visible: vis.jobTitle },
-    { label: 'Company', value: info.companyName, visible: vis.companyName },
-    { label: 'Category', value: info.businessCategory, visible: vis.businessCategory },
-    { label: 'Mobile', value: info.mobile, visible: vis.mobile },
-    { label: 'Alternate Mobile', value: info.alternateMobile, visible: vis.alternateMobile },
-    { label: 'WhatsApp', value: info.whatsapp, visible: vis.whatsapp },
-    { label: 'Email', value: info.email, visible: vis.email },
-    { label: 'Alternate Email', value: info.alternateEmail, visible: vis.alternateEmail },
-    { label: 'Website', value: info.website, visible: vis.website },
-    { label: 'Business Address', value: info.businessAddress, visible: vis.businessAddress },
-    { label: 'Personal Address', value: info.personalAddress, visible: Boolean(vis.personalAddress) },
-    {
-      label: 'City / State / PIN',
-      value: [info.city, info.state, info.pinCode, info.country].filter(Boolean).join(', '),
-      visible: vis.businessAddress,
-    },
-  ];
+  const detailRows: { label: string; value?: string; visible: boolean }[] =
+    pType === 'kids'
+      ? [
+          { label: "Child's Name", value: info.fullName, visible: vis.fullName },
+          { label: 'Parent / Guardian', value: info.parentName, visible: Boolean(vis.parentContact) },
+          { label: 'Parent Mobile', value: info.parentMobile || info.mobile, visible: Boolean(vis.parentContact || vis.mobile) },
+          { label: 'Emergency Helpline', value: [info.emergencyContactName, info.emergencyContactPhone].filter(Boolean).join(' · '), visible: Boolean(vis.emergencyContact) },
+          { label: 'School / Class', value: info.schoolOrClass, visible: Boolean(vis.schoolOrClass) },
+          { label: 'Blood Group', value: info.bloodGroup, visible: Boolean(vis.bloodGroup) },
+          { label: 'Date of Birth', value: info.dateOfBirth, visible: Boolean(vis.dateOfBirth) },
+          { label: 'Allergies / Medical Notes', value: info.allergiesOrMedical, visible: Boolean(vis.medicalInfo) },
+          { label: 'Home Address', value: info.personalAddress, visible: Boolean(vis.personalAddress) },
+          { label: 'City / State / PIN', value: [info.city, info.state, info.pinCode, info.country].filter(Boolean).join(', '), visible: Boolean(vis.personalAddress) },
+        ]
+      : pType === 'pets'
+        ? [
+            { label: 'Pet Name', value: info.fullName, visible: vis.fullName },
+            { label: 'Pet Type', value: info.petType, visible: Boolean(vis.petDetails) },
+            { label: 'Breed', value: info.breed, visible: Boolean(vis.petDetails) },
+            { label: 'Gender / Color', value: [info.petGender, info.petColor].filter(Boolean).join(' · '), visible: Boolean(vis.petDetails) },
+            { label: 'Microchip / Tag ID', value: info.microchipId, visible: Boolean(vis.petDetails) },
+            { label: 'Owner Name', value: info.ownerName, visible: Boolean(vis.ownerContact) },
+            { label: 'Owner Mobile', value: info.ownerMobile || info.mobile, visible: Boolean(vis.ownerContact || vis.mobile) },
+            { label: 'Veterinarian', value: [info.vetName, info.vetPhone].filter(Boolean).join(' · '), visible: Boolean(vis.vetContact) },
+            { label: 'Diet / Medical Notes', value: info.allergiesOrMedical, visible: Boolean(vis.medicalInfo) },
+            { label: 'Home Address', value: info.personalAddress, visible: Boolean(vis.personalAddress) },
+          ]
+        : pType === 'belongings'
+          ? [
+              { label: 'Item / Owner Label', value: info.fullName, visible: vis.fullName },
+              { label: 'Item Category', value: info.itemCategory, visible: Boolean(vis.itemDetails) },
+              { label: 'Brand & Model', value: info.brandModel, visible: Boolean(vis.itemDetails) },
+              { label: 'Serial / Tag Reference', value: info.serialNumber, visible: Boolean(vis.itemDetails) },
+              { label: 'Owner Mobile', value: info.mobile, visible: vis.mobile },
+              { label: 'WhatsApp', value: info.whatsapp, visible: vis.whatsapp },
+              { label: 'Email', value: info.email, visible: vis.email },
+              { label: 'Finder Notes', value: info.finderNotes, visible: Boolean(vis.finderNotes) },
+              { label: 'Return Address', value: info.personalAddress, visible: Boolean(vis.personalAddress) },
+              { label: 'City / State / PIN', value: [info.city, info.state, info.pinCode, info.country].filter(Boolean).join(', '), visible: Boolean(vis.personalAddress) },
+            ]
+          : [
+              { label: 'Full Name', value: info.fullName, visible: vis.fullName },
+              { label: 'Job Title', value: info.jobTitle, visible: vis.jobTitle },
+              { label: 'Company', value: info.companyName, visible: vis.companyName },
+              { label: 'Category', value: info.businessCategory, visible: vis.businessCategory },
+              { label: 'Mobile', value: info.mobile, visible: vis.mobile },
+              { label: 'Alternate Mobile', value: info.alternateMobile, visible: vis.alternateMobile },
+              { label: 'WhatsApp', value: info.whatsapp, visible: vis.whatsapp },
+              { label: 'Email', value: info.email, visible: vis.email },
+              { label: 'Alternate Email', value: info.alternateEmail, visible: vis.alternateEmail },
+              { label: 'Website', value: info.website, visible: vis.website },
+              { label: 'Blood Group', value: info.bloodGroup, visible: Boolean(vis.bloodGroup) },
+              { label: 'Emergency Contact', value: [info.emergencyContactName, info.emergencyContactPhone].filter(Boolean).join(' · '), visible: Boolean(vis.emergencyContact) },
+              { label: 'Aadhaar (Optional)', value: info.aadhaarNumber, visible: Boolean(vis.aadhaarNumber) },
+              { label: 'PAN (Optional)', value: info.panNumber, visible: Boolean(vis.panNumber) },
+              { label: 'Business Address', value: info.businessAddress, visible: vis.businessAddress },
+              { label: 'Personal Address', value: info.personalAddress, visible: Boolean(vis.personalAddress) },
+              {
+                label: 'City / State / PIN',
+                value: [info.city, info.state, info.pinCode, info.country].filter(Boolean).join(', '),
+                visible: vis.businessAddress,
+              },
+            ];
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
@@ -262,6 +314,9 @@ const AdminProfileInspectorModal: React.FC<{
                   Owner: {owner?.email || profile.uid} · Template: {profile.selectedTemplate}
                 </div>
                 <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-indigo-50 text-indigo-800 border border-indigo-200">
+                    {pTypeMeta.label}
+                  </span>
                   <span
                     className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
                       paid ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
@@ -1321,6 +1376,11 @@ export const AdminOrdersPage: React.FC = () => {
                   <td className="py-3 px-4 font-mono font-semibold text-[#0B1D3A]">
                     {o.orderNumber}
                     {o.profileSlug && <div className="text-[11px] font-normal text-slate-400">/p/{o.profileSlug}</div>}
+                    {(o.orderSource === 'shop' || o.shopItems?.length) && (
+                      <div className="text-[10px] font-sans font-semibold text-[#1D4ED8]">
+                        Shop ({o.shopItems?.reduce((acc, it) => acc + it.quantity, 0) || o.quantity} items)
+                      </div>
+                    )}
                   </td>
                   <td className="py-3 px-4">{o.shippingAddress.fullName}</td>
                   <td className="py-3 px-4 font-mono tabular-nums">₹{o.total}</td>
@@ -1907,9 +1967,33 @@ export const AdminOrderDetailPage: React.FC = () => {
             </div>
           </div>
 
-          {/* QR Artwork & Print File Readiness */}
+          {/* QR Artwork & Print File Readiness / Shop Items */}
           <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
-            <h2 className="font-display font-bold text-base text-[#0B1D3A]">Verified QR Code & Print Files</h2>
+            {order.shopItems && order.shopItems.length > 0 && (
+              <div className="space-y-3 pb-4 border-b border-slate-100">
+                <h2 className="font-display font-bold text-base text-[#0B1D3A]">
+                  Ordered Shop Smart Tags ({order.shopItems.reduce((a, b) => a + b.quantity, 0)} items)
+                </h2>
+                <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
+                  {order.shopItems.map((it) => (
+                    <div key={it.productId} className="p-3 bg-slate-50/70 flex items-center justify-between gap-3 text-xs">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-[#0B1D3A]">{it.name}</div>
+                        <div className="text-[11px] text-slate-500">
+                          {[it.categoryName, it.cardType].filter(Boolean).join(' · ') || 'Smart Safety Tag'}
+                        </div>
+                      </div>
+                      <div className="text-right font-mono tabular-nums shrink-0">
+                        <div className="text-slate-600">{it.quantity} × ₹{it.priceInr}</div>
+                        <div className="font-bold text-[#0B1D3A]">₹{it.lineTotal ?? it.priceInr * it.quantity}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <h2 className="font-display font-bold text-base text-[#0B1D3A]">Verified QR Code &amp; Print Files</h2>
             {qr?.pngDataUrl ? (
               <div className="flex flex-col sm:flex-row sm:items-center gap-4">
                 <img src={qr.pngDataUrl} alt="Order QR" className="w-28 h-28 border border-slate-200 rounded-xl shrink-0" />
@@ -1957,7 +2041,9 @@ export const AdminOrderDetailPage: React.FC = () => {
             ) : (
               <div className="p-4 rounded-xl bg-slate-50 border border-dashed border-slate-300 space-y-3">
                 <p className="text-xs text-slate-600">
-                  No production QR artifact is attached to this order yet. Generate it now to enable immediate 300 DPI PDF printing.
+                  {order.designId === 'shop_direct'
+                    ? 'Direct Shop product order. Generate a printable pack/tag QR reference if needed for fulfilment.'
+                    : 'No production QR artifact is attached to this order yet. Generate it now to enable immediate 300 DPI PDF printing.'}
                 </p>
                 <button
                   type="button"
@@ -2052,6 +2138,8 @@ export const AdminCardTemplatesPage: React.FC = () => {
   const [priceInr, setPriceInr] = useState(1350);
   const [cardType, setCardType] = useState('Matte PVC SMART');
   const [category, setCategory] = useState('Executive');
+  const [newProfileType, setNewProfileType] = useState<'all' | ProfileType>('all');
+  const [typeFilter, setTypeFilter] = useState<'ALL' | 'all' | ProfileType>('ALL');
   const [description, setDescription] = useState('');
   const [bgColor, setBgColor] = useState('#0B1D3A');
   const [draftFrontBgImage, setDraftFrontBgImage] = useState('');
@@ -2066,6 +2154,9 @@ export const AdminCardTemplatesPage: React.FC = () => {
 
   const enabledCount = templates.filter((t) => t.active).length;
   const activeDefaultTpl = templates.find((t) => t.isDefault) || templates.find((t) => t.active) || null;
+  const visibleTemplatesList = templates.filter(
+    (t) => typeFilter === 'ALL' || (t.profileType || 'all') === typeFilter
+  );
 
   const buildNewTemplateDraft = (): CardTemplateRecord => {
     const base = DEFAULT_CARD_TEMPLATES.find((t) => t.templateId === 'premium-navy') || DEFAULT_CARD_TEMPLATES[0];
@@ -2076,6 +2167,7 @@ export const AdminCardTemplatesPage: React.FC = () => {
       priceInr: Math.max(0, Number(priceInr) || 0),
       cardType: cardType.trim() || 'Matte PVC SMART',
       category: category.trim() || 'Executive',
+      profileType: newProfileType,
       description: description.trim(),
       active: newIsDefault ? true : newActive,
       isDefault: newIsDefault,
@@ -2391,34 +2483,80 @@ export const AdminCardTemplatesPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-5 pt-2 border-t border-slate-100">
-            <label className="inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={newIsDefault ? true : newActive}
-                disabled={newIsDefault}
-                onChange={(e) => setNewActive(e.target.checked)}
-                className="h-4 w-4 accent-[#1D4ED8]"
-              />
-              <span>Enable immediately for users</span>
-            </label>
-            <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#0B1D3A] cursor-pointer">
-              <input
-                type="checkbox"
-                checked={newIsDefault}
-                onChange={(e) => {
-                  setNewIsDefault(e.target.checked);
-                  if (e.target.checked) setNewActive(true);
-                }}
-                className="h-4 w-4 accent-amber-600"
-              />
-              <span>Make this the Default Template for users</span>
-            </label>
+          <div className="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-slate-100">
+            <div className="flex flex-wrap items-center gap-5">
+              <label className="inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={newIsDefault ? true : newActive}
+                  disabled={newIsDefault}
+                  onChange={(e) => setNewActive(e.target.checked)}
+                  className="h-4 w-4 accent-[#1D4ED8]"
+                />
+                <span>Enable immediately for users</span>
+              </label>
+              <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#0B1D3A] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={newIsDefault}
+                  onChange={(e) => {
+                    setNewIsDefault(e.target.checked);
+                    if (e.target.checked) setNewActive(true);
+                  }}
+                  className="h-4 w-4 accent-amber-600"
+                />
+                <span>Make this the Default Template for users</span>
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-[11px] font-medium text-slate-500">Target Profile Type:</label>
+              <select
+                value={newProfileType}
+                onChange={(e) => setNewProfileType(e.target.value as 'all' | ProfileType)}
+                className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white"
+              >
+                <option value="all">All Profile Types</option>
+                <option value="adult">Adult / Business</option>
+                <option value="kids">Kids Safety</option>
+                <option value="pets">Pets Recovery</option>
+                <option value="belongings">Personal Belongings</option>
+              </select>
+            </div>
           </div>
         </form>
 
+        {/* Template Type Filter Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-2 bg-white border border-slate-200 rounded-2xl p-3">
+          <span className="text-xs font-semibold text-slate-600 px-1">Filter by Profile Type:</span>
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              [
+                { id: 'ALL', label: `All (${templates.length})` },
+                { id: 'all', label: 'Universal' },
+                { id: 'adult', label: 'Adult' },
+                { id: 'kids', label: 'Kids' },
+                { id: 'pets', label: 'Pets' },
+                { id: 'belongings', label: 'Belongings' },
+              ] as const
+            ).map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setTypeFilter(f.id)}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                  typeFilter === f.id
+                    ? 'bg-[#0B1D3A] text-white border-[#0B1D3A]'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {templates.map((t) => (
+          {visibleTemplatesList.map((t) => (
             <div
               key={t.templateId}
               className={`bg-white border rounded-2xl p-4 sm:p-5 flex flex-col justify-between gap-4 transition-colors ${
@@ -2482,6 +2620,7 @@ export const AdminCardTemplatesPage: React.FC = () => {
                     <h3 className="font-display font-bold text-sm text-[#0B1D3A] truncate">{t.name}</h3>
                     <p className="text-xs text-slate-500">
                       {t.cardType} · {t.category || 'Standard'}
+                      {t.profileType && t.profileType !== 'all' ? ` · ${t.profileType.toUpperCase()}` : ''}
                     </p>
                   </div>
                   <span className="font-mono text-xs font-bold text-[#1D4ED8] shrink-0">₹{t.priceInr}</span>
@@ -3291,8 +3430,13 @@ export const AdminProfilesPage: React.FC = () => {
                   return (
                     <tr key={p.profileId}>
                       <td className="py-3 px-4">
-                        <div className="font-semibold text-[#0B1D3A]">
-                          {p.personalInformation.fullName || p.profileLabel || p.slug}
+                        <div className="font-semibold text-[#0B1D3A] flex items-center gap-1.5">
+                          <span>{p.personalInformation.fullName || p.profileLabel || p.slug}</span>
+                          {p.profileType && p.profileType !== 'adult' && (
+                            <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-200 text-[10px] font-semibold uppercase">
+                              {p.profileType}
+                            </span>
+                          )}
                         </div>
                         <div className="text-slate-500">{owner?.email || p.uid}</div>
                       </td>

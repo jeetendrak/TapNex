@@ -6,13 +6,17 @@ import {
   BLANK_CARD_TEMPLATE,
   createBlankSideDesign,
   DEFAULT_CARD_TEMPLATES,
+  DEFAULT_SHOP_CATEGORIES,
+  DEFAULT_SHOP_PRODUCTS,
   DEFAULT_VISIBILITY,
   PAYMENT_GATEWAY_ORDER,
 } from '../src/lib/constants';
 import {
   buildSanitizedPublicProfile,
   calculateProfileCompletion,
+  copyProfileFieldsBySelection,
   filterAuditLogs,
+  generateAutoProfileSlug,
   isOrderPaymentConfirmed,
   maskEmail,
   maskPhone,
@@ -931,7 +935,7 @@ describe('Design Studio Layout Engine, Rich Bio Sanitizer & Link Controls', () =
       path.resolve(process.cwd(), 'src/pages/customer/CustomerProfilePages.tsx'),
       'utf8'
     );
-    expect(customerProfileSrc).toContain('active={!isPaid}');
+    expect(customerProfileSrc).toContain('active={!effectiveLive}');
 
     const appSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/App.tsx'), 'utf8');
     expect(appSrc).toContain('<Route path="/p/:slug" element={<PublicProfilePage />} />');
@@ -941,6 +945,144 @@ describe('Design Studio Layout Engine, Rich Bio Sanitizer & Link Controls', () =
     expect(rulesSrc).toContain('match /publicProfiles/{slug}');
   });
 });
+
+describe('Smart Safety Tags Shop, Multi-Profile Types, Auto-Slugs & Family Reuse', () => {
+  it('provides all 5 required Shop categories and Shop Firestore rules without any competitor text', () => {
+    const names = DEFAULT_SHOP_CATEGORIES.map((c) => c.name);
+    expect(names).toEqual([
+      'Helmet Tags / Stickers',
+      'Pet Tags',
+      'Personal Belonging Tags / Stickers',
+      'Kids Tags',
+      'Find My Owner Tags',
+    ]);
+    for (const cat of DEFAULT_SHOP_CATEGORIES) {
+      expect(DEFAULT_SHOP_PRODUCTS.some((p) => p.categoryId === cat.categoryId && p.visibleOnShop)).toBe(true);
+    }
+
+    const rulesSrc = fs.readFileSync(path.resolve(process.cwd(), 'firestore.rules'), 'utf8');
+    expect(rulesSrc).toContain('match /shopCategories/{categoryId}');
+    expect(rulesSrc).toContain('match /shopProducts/{productId}');
+    expect(rulesSrc).toContain("in ['studio', 'shop']");
+    expect(rulesSrc).toContain("== 'shop'");
+
+    const shopSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/pages/public/ShopPage.tsx'), 'utf8');
+    expect(shopSrc.toLowerCase()).not.toContain('tageze');
+  });
+
+  it('auto-generates safe unique-format slugs and selectively copies reusable family profile fields', () => {
+    const namedSlug = generateAutoProfileSlug('Aarav Mehta');
+    expect(namedSlug).toMatch(/^aarav-mehta-[a-z0-9]{4,6}$/);
+    expect(namedSlug.length).toBeLessThanOrEqual(64);
+
+    const fallbackSlug = generateAutoProfileSlug('');
+    expect(fallbackSlug).toMatch(/^tpnx-[a-z0-9]+$/);
+
+    const copied = copyProfileFieldsBySelection(
+      {
+        fullName: 'Priya Sharma',
+        mobile: '+91 98201 11223',
+        whatsapp: '+91 98201 11223',
+        email: 'priya@example.com',
+        personalAddress: '204 Marine Lines',
+        city: 'Mumbai',
+        state: 'Maharashtra',
+        pinCode: '400020',
+        country: 'India',
+        emergencyContactName: 'Rohan Sharma',
+        emergencyContactPhone: '+91 98201 99887',
+      },
+      {
+        address: true,
+        parentContact: true,
+        emergencyContact: true,
+        mobile: false,
+        email: false,
+      }
+    );
+
+    expect(copied.personalAddress).toBe('204 Marine Lines');
+    expect(copied.city).toBe('Mumbai');
+    expect(copied.parentName).toBe('Priya Sharma');
+    expect(copied.parentMobile).toBe('+91 98201 11223');
+    expect(copied.emergencyContactName).toBe('Rohan Sharma');
+    expect(copied.mobile).toBeUndefined();
+    expect(copied.email).toBeUndefined();
+    expect(copied.fullName).toBeUndefined();
+  });
+
+  it('isolates adult-only professional/government fields from kids, pets, and belongings public profiles', () => {
+    const kidsProfile = makeSampleProfile({
+      profileType: 'kids',
+      personalInformation: {
+        ...makeSampleProfile().personalInformation,
+        fullName: 'Riya Mehta',
+        schoolOrClass: 'Grade 4 - Oakridge',
+        parentName: 'Aarav Mehta',
+        parentMobile: '+91 98201 44510',
+        bloodGroup: 'O+',
+        allergiesOrMedical: 'Peanut allergy',
+        aadhaarNumber: '1234 5678 9012',
+        panNumber: 'ABCDE1234F',
+      },
+      visibilitySettings: {
+        ...DEFAULT_VISIBILITY,
+        parentContact: true,
+        schoolOrClass: true,
+        bloodGroup: true,
+        medicalInfo: true,
+      },
+    });
+    const pubKids = buildSanitizedPublicProfile(kidsProfile);
+    expect(pubKids.profileType).toBe('kids');
+    expect(pubKids.personalInformation?.parentName).toBe('Aarav Mehta');
+    expect(pubKids.personalInformation?.schoolOrClass).toBe('Grade 4 - Oakridge');
+    expect(pubKids.personalInformation?.bloodGroup).toBe('O+');
+    expect(pubKids.personalInformation?.allergiesOrMedical).toBe('Peanut allergy');
+    expect(pubKids.personalInformation?.jobTitle).toBeUndefined();
+    expect(pubKids.personalInformation?.companyName).toBeUndefined();
+    expect(pubKids.personalInformation?.aadhaarNumber).toBeUndefined();
+    expect(pubKids.personalInformation?.panNumber).toBeUndefined();
+
+    const petsProfile = makeSampleProfile({
+      profileType: 'pets',
+      personalInformation: {
+        ...makeSampleProfile().personalInformation,
+        fullName: 'Bruno',
+        petType: 'Dog',
+        breed: 'Golden Retriever',
+        microchipId: 'IND-9001234',
+        ownerName: 'Aarav Mehta',
+        ownerMobile: '+91 98201 44510',
+        vetPhone: '+91 98111 22334',
+      },
+    });
+    const pubPets = buildSanitizedPublicProfile(petsProfile);
+    expect(pubPets.profileType).toBe('pets');
+    expect(pubPets.personalInformation?.petType).toBe('Dog');
+    expect(pubPets.personalInformation?.breed).toBe('Golden Retriever');
+    expect(pubPets.personalInformation?.microchipId).toBe('IND-9001234');
+    expect(pubPets.personalInformation?.jobTitle).toBeUndefined();
+  });
+
+  it('resolves Kids, Pets, and Belongings tokens in resolveCardTokens', () => {
+    const out = resolveCardTokens(
+      '{{PARENT_NAME}} | {{SCHOOL_CLASS}} | {{BLOOD_GROUP}} | {{PET_TYPE}} | {{BREED}} | {{ITEM_CATEGORY}} | {{SERIAL_NUMBER}} | {{FINDER_NOTES}}',
+      {
+        parentName: 'Neha Rao',
+        schoolOrClass: 'Class 3B',
+        bloodGroup: 'B+',
+        petType: 'Cat',
+        breed: 'Siamese',
+        itemCategory: 'Laptop Bag',
+        serialNumber: 'SN-7788',
+        finderNotes: 'Reward offered',
+      }
+    );
+    expect(out).toBe('Neha Rao | Class 3B | B+ | Cat | Siamese | Laptop Bag | SN-7788 | Reward offered');
+  });
+});
+
 
 
 

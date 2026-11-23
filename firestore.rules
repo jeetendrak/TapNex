@@ -110,9 +110,10 @@ service cloud.firestore {
 
     function isValidProfile(data) {
       return data.keys().hasAll(['profileId', 'uid', 'slug', 'personalInformation', 'visibilitySettings', 'isPublic', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['profileId', 'uid', 'profileLabel', 'slug', 'personalInformation', 'socialLinks', 'customFields', 'visibilitySettings', 'selectedTemplate', 'isPublic', 'paymentConfirmed', 'paymentCompletedAt', 'paymentReference', 'adminApproved', 'adminApprovedAt', 'adminApprovedBy', 'adminDisabled', 'viewsCount', 'qrScansCount', 'nfcVisitsCount', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['profileId', 'uid', 'profileType', 'profileLabel', 'slug', 'personalInformation', 'socialLinks', 'customFields', 'visibilitySettings', 'selectedTemplate', 'isPublic', 'paymentConfirmed', 'paymentCompletedAt', 'paymentReference', 'adminApproved', 'adminApprovedAt', 'adminApprovedBy', 'adminDisabled', 'viewsCount', 'qrScansCount', 'nfcVisitsCount', 'createdAt', 'updatedAt']) &&
         isValidId(data.profileId) &&
         isValidId(data.uid) &&
+        (!('profileType' in data) || data.profileType in ['adult', 'kids', 'pets', 'belongings']) &&
         data.slug is string && data.slug.size() >= 3 && data.slug.size() <= 64 && data.slug.matches('^[a-z0-9\\-]+$') &&
         data.personalInformation is map &&
         data.visibilitySettings is map &&
@@ -135,10 +136,11 @@ service cloud.firestore {
 
     function isValidPublicProfile(data) {
       return data.keys().hasAll(['slug', 'profileId', 'uid', 'isPublic', 'updatedAt']) &&
-        data.keys().hasOnly(['slug', 'profileId', 'uid', 'isPublic', 'unavailableMessage', 'personalInformation', 'socialLinks', 'customFields', 'themeColor', 'paymentConfirmed', 'paymentCompletedAt', 'adminApproved', 'adminApprovedAt', 'adminApprovedBy', 'adminDisabled', 'lastPaidOrderId', 'updatedAt']) &&
+        data.keys().hasOnly(['slug', 'profileId', 'uid', 'profileType', 'isPublic', 'unavailableMessage', 'personalInformation', 'socialLinks', 'customFields', 'themeColor', 'paymentConfirmed', 'paymentCompletedAt', 'adminApproved', 'adminApprovedAt', 'adminApprovedBy', 'adminDisabled', 'lastPaidOrderId', 'updatedAt']) &&
         data.slug is string && data.slug.size() >= 3 && data.slug.size() <= 64 && data.slug.matches('^[a-z0-9\\-]+$') &&
         isValidId(data.profileId) &&
         isValidId(data.uid) &&
+        (!('profileType' in data) || data.profileType in ['adult', 'kids', 'pets', 'belongings']) &&
         data.isPublic is bool &&
         (!('unavailableMessage' in data) || (data.unavailableMessage is string && data.unavailableMessage.size() <= 300)) &&
         (!('personalInformation' in data) || data.personalInformation is map) &&
@@ -156,10 +158,11 @@ service cloud.firestore {
 
     function isValidCardTemplate(data) {
       return data.keys().hasAll(['templateId', 'name', 'priceInr', 'active', 'frontSpec', 'backSpec']) &&
-        data.keys().hasOnly(['templateId', 'name', 'category', 'description', 'priceInr', 'cardType', 'active', 'isDefault', 'supportsVertical', 'frontSpec', 'backSpec', 'updatedAt']) &&
+        data.keys().hasOnly(['templateId', 'name', 'category', 'profileType', 'description', 'priceInr', 'cardType', 'active', 'isDefault', 'supportsVertical', 'frontSpec', 'backSpec', 'updatedAt']) &&
         isValidId(data.templateId) &&
         data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
         (!('category' in data) || (data.category is string && data.category.size() <= 60)) &&
+        (!('profileType' in data) || data.profileType in ['all', 'adult', 'kids', 'pets', 'belongings']) &&
         (!('description' in data) || (data.description is string && data.description.size() <= 400)) &&
         (!('cardType' in data) || (data.cardType is string && data.cardType.size() <= 80)) &&
         data.priceInr is number && data.priceInr >= 0 &&
@@ -187,12 +190,14 @@ service cloud.firestore {
 
     function isValidOrder(data) {
       return data.keys().hasAll(['orderId', 'orderNumber', 'uid', 'profileId', 'designId', 'quantity', 'total', 'currency', 'paymentStatus', 'orderStatus', 'shippingAddress', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['orderId', 'orderNumber', 'uid', 'profileId', 'profileSlug', 'designId', 'printerId', 'quantity', 'cardType', 'subtotal', 'tax', 'shipping', 'total', 'currency', 'paymentStatus', 'orderStatus', 'shippingAddress', 'qrCodeId', 'printFileReady', 'courierName', 'trackingNumber', 'trackingUrl', 'dispatchDate', 'internalNotes', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['orderId', 'orderNumber', 'uid', 'profileId', 'profileSlug', 'designId', 'orderSource', 'shopItems', 'printerId', 'quantity', 'cardType', 'subtotal', 'tax', 'shipping', 'total', 'currency', 'paymentStatus', 'orderStatus', 'shippingAddress', 'qrCodeId', 'printFileReady', 'courierName', 'trackingNumber', 'trackingUrl', 'dispatchDate', 'internalNotes', 'createdAt', 'updatedAt']) &&
         isValidId(data.orderId) &&
         data.orderNumber is string && data.orderNumber.size() >= 3 && data.orderNumber.size() <= 40 &&
         isValidId(data.uid) &&
         isValidId(data.profileId) &&
         isValidId(data.designId) &&
+        (!('orderSource' in data) || data.orderSource in ['studio', 'shop']) &&
+        (!('shopItems' in data) || (data.shopItems is list && data.shopItems.size() <= 50)) &&
         data.quantity is number && data.quantity >= 1 && data.quantity <= 1000 &&
         data.total is number && data.total >= 0 &&
         data.currency == 'INR' &&
@@ -301,6 +306,39 @@ service cloud.firestore {
         (!('paymentGateways' in data) || data.paymentGateways is map);
     }
 
+    function isValidShopCategory(data) {
+      return data.keys().hasAll(['categoryId', 'name', 'slug', 'active', 'sortOrder']) &&
+        data.keys().hasOnly(['categoryId', 'name', 'slug', 'description', 'active', 'sortOrder', 'updatedAt']) &&
+        isValidId(data.categoryId) &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
+        data.slug is string && data.slug.size() >= 2 && data.slug.size() <= 80 &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 400)) &&
+        data.active is bool &&
+        data.sortOrder is number;
+    }
+
+    function isValidShopProduct(data) {
+      return data.keys().hasAll(['productId', 'name', 'categoryId', 'priceInr', 'visibleOnShop', 'inStock']) &&
+        data.keys().hasOnly(['productId', 'name', 'slug', 'categoryId', 'categoryName', 'shortDescription', 'description', 'features', 'priceInr', 'compareAtPriceInr', 'cardType', 'imageDataUrl', 'badgeText', 'visibleOnShop', 'featured', 'inStock', 'sortOrder', 'createdAt', 'updatedAt']) &&
+        isValidId(data.productId) &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 140 &&
+        isValidId(data.categoryId) &&
+        (!('slug' in data) || (data.slug is string && data.slug.size() <= 140)) &&
+        (!('categoryName' in data) || (data.categoryName is string && data.categoryName.size() <= 100)) &&
+        (!('shortDescription' in data) || (data.shortDescription is string && data.shortDescription.size() <= 300)) &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 2000)) &&
+        (!('features' in data) || (data.features is list && data.features.size() <= 20)) &&
+        data.priceInr is number && data.priceInr >= 0 &&
+        (!('compareAtPriceInr' in data) || (data.compareAtPriceInr is number && data.compareAtPriceInr >= 0)) &&
+        (!('cardType' in data) || (data.cardType is string && data.cardType.size() <= 100)) &&
+        (!('imageDataUrl' in data) || (data.imageDataUrl is string && data.imageDataUrl.size() <= 900000)) &&
+        (!('badgeText' in data) || (data.badgeText is string && data.badgeText.size() <= 60)) &&
+        data.visibleOnShop is bool &&
+        (!('featured' in data) || data.featured is bool) &&
+        data.inStock is bool &&
+        (!('sortOrder' in data) || data.sortOrder is number);
+    }
+
     // --- Collection Rules ---
 
     // 1. Users
@@ -377,7 +415,7 @@ service cloud.firestore {
           (isActiveUser() && existing().uid == request.auth.uid &&
             incoming().get('adminApproved', false) == existing().get('adminApproved', false) &&
             incoming().get('adminDisabled', false) == existing().get('adminDisabled', false) &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['profileLabel', 'slug', 'personalInformation', 'socialLinks', 'customFields', 'visibilitySettings', 'selectedTemplate', 'isPublic', 'paymentConfirmed', 'paymentCompletedAt', 'paymentReference', 'updatedAt']))
+            incoming().diff(existing()).affectedKeys().hasOnly(['profileType', 'profileLabel', 'slug', 'personalInformation', 'socialLinks', 'customFields', 'visibilitySettings', 'selectedTemplate', 'isPublic', 'paymentConfirmed', 'paymentCompletedAt', 'paymentReference', 'updatedAt']))
         );
       allow delete: if isValidId(profileId) && (isAdmin() || (isActiveUser() && existing().uid == request.auth.uid));
     }
@@ -458,7 +496,7 @@ service cloud.firestore {
         (isSignedIn() && resource.data.printerId == request.auth.uid) ||
         isAdmin();
       allow create: if isValidId(orderId) && isValidOrder(incoming()) &&
-        exists(/databases/$(database)/documents/cardDesigns/$(incoming().designId)) &&
+        (incoming().get('orderSource', 'studio') == 'shop' || exists(/databases/$(database)/documents/cardDesigns/$(incoming().designId))) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time && (
           isAdmin() ||
@@ -582,6 +620,20 @@ service cloud.firestore {
         incoming().createdAt == request.time;
       allow update: if false;
       allow delete: if isValidId(logId) && isSuperAdmin();
+    }
+
+    // 17. Shop Categories
+    match /shopCategories/{categoryId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(categoryId) && isAdmin() && isValidShopCategory(incoming());
+      allow delete: if isValidId(categoryId) && isAdmin();
+    }
+
+    // 18. Shop Products
+    match /shopProducts/{productId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(productId) && isAdmin() && isValidShopProduct(incoming());
+      allow delete: if isValidId(productId) && isAdmin();
     }
   }
 }

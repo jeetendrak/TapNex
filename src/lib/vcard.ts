@@ -24,29 +24,50 @@ export function buildPublicVCard(profile: PublicProfileRecord, publicUrl: string
     `N:${escapeVCard(lastName)};${escapeVCard(firstName)};;;`,
   ];
 
+  const primaryPhone = info.mobile || info.parentMobile || info.ownerMobile || info.emergencyContactPhone;
   if (info.companyName) lines.push(`ORG:${escapeVCard(info.companyName)}`);
   if (info.jobTitle) lines.push(`TITLE:${escapeVCard(info.jobTitle)}`);
-  if (info.mobile) lines.push(`TEL;TYPE=CELL,VOICE:${info.mobile}`);
-  if (info.whatsapp && info.whatsapp !== info.mobile) lines.push(`TEL;TYPE=CELL:${info.whatsapp}`);
+  if (primaryPhone) lines.push(`TEL;TYPE=CELL,VOICE:${primaryPhone}`);
+  if (info.whatsapp && info.whatsapp !== primaryPhone) lines.push(`TEL;TYPE=CELL:${info.whatsapp}`);
+  if (info.emergencyContactPhone && info.emergencyContactPhone !== primaryPhone) {
+    lines.push(`TEL;TYPE=HOME,VOICE:${info.emergencyContactPhone}`);
+  }
   if (info.alternateMobile) lines.push(`TEL;TYPE=WORK,VOICE:${info.alternateMobile}`);
   if (info.email) lines.push(`EMAIL;TYPE=PREF,INTERNET:${info.email}`);
   if (info.alternateEmail) lines.push(`EMAIL;TYPE=INTERNET:${info.alternateEmail}`);
   if (info.website) lines.push(`URL:${info.website}`);
   lines.push(`URL;TYPE=DigitalProfile:${publicUrl}`);
 
-  if (info.businessAddress || info.city || info.state || info.pinCode || info.country) {
+  const streetAddr = info.businessAddress || info.personalAddress || '';
+  if (streetAddr || info.city || info.state || info.pinCode || info.country) {
     lines.push(
-      `ADR;TYPE=WORK:;;${escapeVCard(info.businessAddress)};${escapeVCard(info.city)};${escapeVCard(info.state)};${escapeVCard(info.pinCode)};${escapeVCard(info.country || 'India')}`
+      `ADR;TYPE=HOME:;;${escapeVCard(streetAddr)};${escapeVCard(info.city)};${escapeVCard(info.state)};${escapeVCard(info.pinCode)};${escapeVCard(info.country || 'India')}`
     );
   }
 
-  if (info.personalAddress) {
-    lines.push(`ADR;TYPE=HOME:;;${escapeVCard(info.personalAddress)};;;;`);
-  }
-
+  const extraNotes: string[] = [];
   const plainBio = stripHtmlToPlainText(info.shortBio);
-  if (plainBio) {
-    lines.push(`NOTE:${escapeVCard(plainBio)}`);
+  if (plainBio) extraNotes.push(plainBio);
+  if (info.bloodGroup) extraNotes.push(`Blood Group: ${info.bloodGroup}`);
+  if (info.parentName || info.parentMobile) {
+    extraNotes.push(`Parent: ${[info.parentName, info.parentMobile].filter(Boolean).join(' · ')}`);
+  }
+  if (info.ownerName || info.ownerMobile) {
+    extraNotes.push(`Owner: ${[info.ownerName, info.ownerMobile].filter(Boolean).join(' · ')}`);
+  }
+  if (info.emergencyContactName || info.emergencyContactPhone) {
+    extraNotes.push(
+      `Emergency: ${[info.emergencyContactName, info.emergencyContactRelation, info.emergencyContactPhone].filter(Boolean).join(' · ')}`
+    );
+  }
+  if (info.allergiesOrMedical) extraNotes.push(`Medical/Allergies: ${info.allergiesOrMedical}`);
+  if (info.petType || info.breed) extraNotes.push(`Pet: ${[info.petType, info.breed].filter(Boolean).join(' · ')}`);
+  if (info.itemCategory || info.brandModel) {
+    extraNotes.push(`Item: ${[info.itemCategory, info.brandModel].filter(Boolean).join(' · ')}`);
+  }
+  if (info.finderNotes) extraNotes.push(`Finder Notes: ${info.finderNotes}`);
+  if (extraNotes.length > 0) {
+    lines.push(`NOTE:${escapeVCard(extraNotes.join(' | '))}`);
   }
 
   lines.push('END:VCARD');

@@ -109,6 +109,8 @@ export interface CustomFieldItem {
   visible: boolean;
 }
 
+export type ProfileType = 'adult' | 'kids' | 'pets' | 'belongings';
+
 export interface PersonalInformation {
   photoDataUrl?: string;
   fullName: string;
@@ -128,6 +130,36 @@ export interface PersonalInformation {
   state: string;
   pinCode: string;
   country: string;
+  // Adult Emergency & ID
+  emergencyContactName?: string;
+  emergencyContactRelation?: string;
+  emergencyContactPhone?: string;
+  bloodGroup?: string;
+  aadhaarNumber?: string;
+  panNumber?: string;
+  // Kids Fields
+  dateOfBirth?: string;
+  age?: string;
+  parentName?: string;
+  parentMobile?: string;
+  schoolOrClass?: string;
+  allergiesOrMedical?: string;
+  specialNotes?: string;
+  // Pets Fields
+  petType?: string;
+  breed?: string;
+  petGender?: string;
+  petColor?: string;
+  microchipId?: string;
+  ownerName?: string;
+  ownerMobile?: string;
+  vetName?: string;
+  vetPhone?: string;
+  // Personal Belongings Fields
+  itemCategory?: string;
+  brandModel?: string;
+  serialNumber?: string;
+  finderNotes?: string;
 }
 
 export interface VisibilitySettings {
@@ -145,6 +177,20 @@ export interface VisibilitySettings {
   website: boolean;
   businessAddress: boolean;
   personalAddress?: boolean;
+  emergencyContact?: boolean;
+  bloodGroup?: boolean;
+  aadhaarNumber?: boolean;
+  panNumber?: boolean;
+  dateOfBirth?: boolean;
+  parentContact?: boolean;
+  schoolOrClass?: boolean;
+  medicalInfo?: boolean;
+  specialNotes?: boolean;
+  petDetails?: boolean;
+  ownerContact?: boolean;
+  vetContact?: boolean;
+  itemDetails?: boolean;
+  finderNotes?: boolean;
   socialLinks: Record<string, boolean>;
 }
 
@@ -152,6 +198,7 @@ export interface ProfileRecord {
   profileId: string;
   uid: string;
   profileLabel?: string;
+  profileType?: ProfileType;
   slug: string;
   personalInformation: PersonalInformation;
   socialLinks: SocialLinkItem[];
@@ -177,6 +224,7 @@ export interface PublicProfileRecord {
   slug: string;
   profileId: string;
   uid: string;
+  profileType?: ProfileType;
   isPublic: boolean;
   unavailableMessage?: string;
   personalInformation?: Partial<PersonalInformation>;
@@ -260,6 +308,7 @@ export interface CardTemplateRecord {
   templateId: string;
   name: string;
   category?: string;
+  profileType?: ProfileType | 'all';
   description?: string;
   priceInr: number;
   cardType?: string;
@@ -290,6 +339,54 @@ export interface CardDesignRecord {
   updatedAt: unknown;
 }
 
+export interface ShopCategoryRecord {
+  categoryId: string;
+  name: string;
+  slug: string;
+  description?: string;
+  sortOrder: number;
+  active: boolean;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export interface ShopProductRecord {
+  productId: string;
+  name: string;
+  slug?: string;
+  categoryId: string;
+  categoryName?: string;
+  shortDescription?: string;
+  description: string;
+  features: string[];
+  priceInr: number;
+  compareAtPriceInr?: number;
+  cardType?: string;
+  imageDataUrl: string;
+  badgeText?: string;
+  visibleOnShop: boolean;
+  featured?: boolean;
+  inStock: boolean;
+  sortOrder: number;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export interface ShopCartItem {
+  product: ShopProductRecord;
+  quantity: number;
+}
+
+export interface OrderShopItem {
+  productId: string;
+  name: string;
+  categoryName?: string;
+  cardType?: string;
+  quantity: number;
+  priceInr: number;
+  lineTotal?: number;
+}
+
 export interface ShippingAddress {
   fullName: string;
   mobile: string;
@@ -309,6 +406,8 @@ export interface OrderRecord {
   profileId: string;
   profileSlug?: string;
   designId: string;
+  orderSource?: 'studio' | 'shop';
+  shopItems?: OrderShopItem[];
   printerId?: string;
   quantity: number;
   cardType?: string;

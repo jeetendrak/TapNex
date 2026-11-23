@@ -13,6 +13,13 @@ import {
   ExternalLink,
   AlertCircle,
   Lock,
+  HeartPulse,
+  ShieldAlert,
+  UserCheck,
+  PawPrint,
+  Package,
+  School,
+  Droplets,
 } from 'lucide-react';
 import {
   getAllOrders,
@@ -116,12 +123,13 @@ export const PublicProfilePage: React.FC = () => {
     };
   }, [profile, userRecord]);
 
-  const isOwnerViewer = Boolean(userRecord && profile && userRecord.uid === profile.uid);
+  const profileType = profile?.profileType || 'adult';
   const isPrivilegedViewer = userRecord?.role === 'ADMIN' || userRecord?.role === 'SUPERADMIN';
   const isPaymentUnlocked = Boolean(
     profile?.paymentConfirmed || profile?.adminApproved || ownerPaidConfirmed
   );
-  const isPaidLive = Boolean(isPaymentUnlocked || isPrivilegedViewer);
+  // Public profiles open directly without login; Kids, Pets & Belongings recovery tags expose direct emergency contacts without login
+  const isPaidLive = Boolean(isPaymentUnlocked || isPrivilegedViewer || profileType !== 'adult');
 
   const handleCopyUrl = async () => {
     if (!isPaidLive) return;
@@ -179,27 +187,6 @@ export const PublicProfilePage: React.FC = () => {
     );
   }
 
-  // Unpaid profile URLs are not publicly accessible unless payment is confirmed or admin-approved
-  if (!isPaymentUnlocked && !isOwnerViewer && !isPrivilegedViewer) {
-    return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
-        <div className="w-full max-w-md bg-white rounded-3xl p-8 text-center border border-amber-200 shadow-xs space-y-3">
-          <Lock className="h-10 w-10 text-amber-500 mx-auto" />
-          <h1 className="font-display text-xl font-bold text-[#0B1D3A]">Profile Link Pending Activation</h1>
-          <p className="text-sm text-slate-600 leading-relaxed">
-            This public digital card link is watermarked and locked until payment is confirmed or approved by an administrator.
-          </p>
-          <Link
-            to="/"
-            className="mt-4 inline-block px-5 py-2.5 bg-[#0B1D3A] text-white rounded-xl text-sm font-semibold"
-          >
-            Visit TapNex
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
   const info = profile.personalInformation || {};
   const displayedMobile = isPaidLive ? info.mobile : maskPhone(info.mobile);
   const displayedAltMobile = isPaidLive ? info.alternateMobile : maskPhone(info.alternateMobile);
@@ -207,9 +194,16 @@ export const PublicProfilePage: React.FC = () => {
   const displayedEmail = isPaidLive ? info.email : maskEmail(info.email);
   const displayedAltEmail = isPaidLive ? info.alternateEmail : maskEmail(info.alternateEmail);
   const displayedWebsite = isPaidLive ? info.website : info.website ? '•••••.••' : '';
-  const whatsappNumber = isPaidLive ? (info.whatsapp || info.mobile || '').replace(/[^0-9]/g, '') : '';
-  const hasWhatsappItem = Boolean(displayedWhatsapp);
-  const addressParts = [info.businessAddress, info.city, info.state, info.pinCode, info.country].filter(Boolean);
+  const primaryContactPhone = info.mobile || info.parentMobile || info.ownerMobile || info.emergencyContactPhone || '';
+  const whatsappNumber = isPaidLive ? (info.whatsapp || primaryContactPhone).replace(/[^0-9]/g, '') : '';
+  const hasWhatsappItem = Boolean(displayedWhatsapp || (profileType !== 'adult' && primaryContactPhone));
+  const addressParts = [
+    info.businessAddress || (profileType !== 'adult' ? info.personalAddress : ''),
+    info.city,
+    info.state,
+    info.pinCode,
+    info.country,
+  ].filter(Boolean);
 
   return (
     <ScreenProtectionShield active={!isPaidLive} watermarkLabel={`TAPNEX PROTECTED · /p/${profile.slug}`}>
@@ -301,16 +295,39 @@ export const PublicProfilePage: React.FC = () => {
               </div>
             )}
 
-            <h1 className="mt-3 font-display text-2xl font-bold text-[#0B1D3A]">
+            {profileType !== 'adult' && (
+              <div className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-[#1D4ED8]">
+                {profileType === 'kids' && <><ShieldAlert className="h-3.5 w-3.5" /> <span>Child Safety SMART ID</span></>}
+                {profileType === 'pets' && <><PawPrint className="h-3.5 w-3.5" /> <span>Pet Collar Safety Tag</span></>}
+                {profileType === 'belongings' && <><Package className="h-3.5 w-3.5" /> <span>Find My Owner Tag</span></>}
+              </div>
+            )}
+
+            <h1 className="mt-2 font-display text-2xl font-bold text-[#0B1D3A]">
               {info.fullName || `@${profile.slug}`}
             </h1>
-            {(info.jobTitle || info.companyName) && (
+            {profileType === 'adult' && (info.jobTitle || info.companyName) && (
               <p className="mt-1 text-sm font-medium text-slate-600">
                 {[info.jobTitle, info.companyName].filter(Boolean).join(' · ')}
               </p>
             )}
-            {info.businessCategory && (
+            {profileType === 'adult' && info.businessCategory && (
               <p className="mt-0.5 text-xs text-slate-500">{info.businessCategory}</p>
+            )}
+            {profileType === 'kids' && (info.schoolOrClass || info.bloodGroup) && (
+              <p className="mt-1 text-sm font-medium text-slate-600">
+                {[info.schoolOrClass, info.bloodGroup ? `Blood Group: ${info.bloodGroup}` : ''].filter(Boolean).join(' · ')}
+              </p>
+            )}
+            {profileType === 'pets' && (info.petType || info.breed) && (
+              <p className="mt-1 text-sm font-medium text-slate-600">
+                {[info.petType, info.breed, info.petColor].filter(Boolean).join(' · ')}
+              </p>
+            )}
+            {profileType === 'belongings' && (info.itemCategory || info.brandModel) && (
+              <p className="mt-1 text-sm font-medium text-slate-600">
+                {[info.itemCategory, info.brandModel].filter(Boolean).join(' · ')}
+              </p>
             )}
             {info.shortBio && (
               <div
@@ -466,14 +483,16 @@ export const PublicProfilePage: React.FC = () => {
               <div className="flex items-start gap-3.5 px-4 py-3.5">
                 <MapPin className="h-4 w-4 text-[#1D4ED8] shrink-0 mt-0.5" />
                 <div className="min-w-0 flex-1">
-                  <div className="text-xs text-slate-500">Business Address</div>
+                  <div className="text-xs text-slate-500">
+                    {profileType === 'adult' ? 'Business Address' : profileType === 'belongings' ? 'Return Address' : 'Residential Address'}
+                  </div>
                   <div className="text-sm text-slate-800">
                     {isPaidLive ? addressParts.join(', ') : `${info.city || 'India'} (Full address hidden in preview)`}
                   </div>
                 </div>
               </div>
             )}
-            {info.personalAddress && (
+            {profileType === 'adult' && info.personalAddress && (
               <div className="flex items-start gap-3.5 px-4 py-3.5">
                 <MapPin className="h-4 w-4 text-slate-500 shrink-0 mt-0.5" />
                 <div className="min-w-0 flex-1">
@@ -485,6 +504,300 @@ export const PublicProfilePage: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* Kids Safety & Guardian Panel */}
+          {profileType === 'kids' && (
+            <div className="mt-6 space-y-3">
+              {(info.parentName || info.parentMobile || info.emergencyContactPhone) && (
+                <div className="rounded-2xl border border-rose-200 bg-rose-50/70 p-4 space-y-2.5">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-rose-800">
+                    <ShieldAlert className="h-4 w-4" />
+                    <span>Parent &amp; Emergency Contact</span>
+                  </div>
+                  {(info.parentName || info.parentMobile) && (
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-xs text-rose-700">Parent / Guardian</div>
+                        <div className="text-sm font-semibold text-slate-900">{info.parentName || 'Parent / Guardian'}</div>
+                      </div>
+                      {info.parentMobile && (
+                        <a
+                          href={`tel:${info.parentMobile}`}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-700 hover:bg-rose-800 text-white text-xs font-semibold font-mono"
+                        >
+                          <Phone className="h-3.5 w-3.5" />
+                          <span>Call {info.parentMobile}</span>
+                        </a>
+                      )}
+                    </div>
+                  )}
+                  {(info.emergencyContactName || info.emergencyContactPhone) && (
+                    <div className="flex items-center justify-between gap-3 pt-2 border-t border-rose-200/70">
+                      <div>
+                        <div className="text-xs text-rose-700">
+                          Emergency Backup {info.emergencyContactRelation ? `(${info.emergencyContactRelation})` : ''}
+                        </div>
+                        <div className="text-sm font-semibold text-slate-900">
+                          {info.emergencyContactName || 'Emergency Contact'}
+                        </div>
+                      </div>
+                      {info.emergencyContactPhone && (
+                        <a
+                          href={`tel:${info.emergencyContactPhone}`}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white border border-rose-300 text-rose-900 text-xs font-semibold font-mono"
+                        >
+                          <Phone className="h-3.5 w-3.5" />
+                          <span>{info.emergencyContactPhone}</span>
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {(info.dateOfBirth || info.bloodGroup || info.schoolOrClass || info.allergiesOrMedical || info.specialNotes) && (
+                <div className="rounded-2xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
+                  {info.bloodGroup && (
+                    <div className="px-4 py-3 flex items-center justify-between gap-4">
+                      <span className="text-xs text-slate-500 inline-flex items-center gap-1.5"><Droplets className="h-3.5 w-3.5 text-rose-600" />Blood Group</span>
+                      <span className="text-sm font-bold text-rose-700">{info.bloodGroup}</span>
+                    </div>
+                  )}
+                  {info.dateOfBirth && (
+                    <div className="px-4 py-3 flex items-center justify-between gap-4">
+                      <span className="text-xs text-slate-500">Date of Birth / Age</span>
+                      <span className="text-sm font-medium text-slate-900">{info.dateOfBirth}</span>
+                    </div>
+                  )}
+                  {info.schoolOrClass && (
+                    <div className="px-4 py-3 flex items-center justify-between gap-4">
+                      <span className="text-xs text-slate-500 inline-flex items-center gap-1.5"><School className="h-3.5 w-3.5 text-[#1D4ED8]" />School / Class</span>
+                      <span className="text-sm font-medium text-slate-900 text-right">{info.schoolOrClass}</span>
+                    </div>
+                  )}
+                  {info.allergiesOrMedical && (
+                    <div className="px-4 py-3">
+                      <div className="text-xs font-semibold text-rose-700 inline-flex items-center gap-1.5"><HeartPulse className="h-3.5 w-3.5" />Allergies &amp; Medical Information</div>
+                      <p className="mt-1 text-sm text-slate-800">{info.allergiesOrMedical}</p>
+                    </div>
+                  )}
+                  {info.specialNotes && (
+                    <div className="px-4 py-3">
+                      <div className="text-xs text-slate-500">Special Care Notes</div>
+                      <p className="mt-1 text-sm text-slate-800">{info.specialNotes}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Pets Safety & Owner Panel */}
+          {profileType === 'pets' && (
+            <div className="mt-6 space-y-3">
+              {(info.ownerName || info.ownerMobile || info.emergencyContactPhone) && (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 space-y-2.5">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-800">
+                    <PawPrint className="h-4 w-4" />
+                    <span>Pet Owner &amp; Rescue Contact</span>
+                  </div>
+                  {(info.ownerName || info.ownerMobile) && (
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-xs text-emerald-700">Pet Owner</div>
+                        <div className="text-sm font-semibold text-slate-900">{info.ownerName || 'Owner'}</div>
+                      </div>
+                      {info.ownerMobile && (
+                        <a
+                          href={`tel:${info.ownerMobile}`}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold font-mono"
+                        >
+                          <Phone className="h-3.5 w-3.5" />
+                          <span>Call {info.ownerMobile}</span>
+                        </a>
+                      )}
+                    </div>
+                  )}
+                  {info.emergencyContactPhone && (
+                    <div className="flex items-center justify-between gap-3 pt-2 border-t border-emerald-200/70">
+                      <div>
+                        <div className="text-xs text-emerald-700">Alternate / Emergency</div>
+                        <div className="text-sm font-semibold text-slate-900">{info.emergencyContactName || 'Backup Contact'}</div>
+                      </div>
+                      <a
+                        href={`tel:${info.emergencyContactPhone}`}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-emerald-300 text-emerald-900 text-xs font-semibold font-mono"
+                      >
+                        <Phone className="h-3.5 w-3.5" />
+                        <span>{info.emergencyContactPhone}</span>
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {(info.petType || info.breed || info.petGender || info.petColor || info.dateOfBirth || info.microchipId || info.allergiesOrMedical || info.vetName || info.vetPhone) && (
+                <div className="rounded-2xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
+                  {(info.petType || info.breed) && (
+                    <div className="px-4 py-3 flex items-center justify-between gap-4">
+                      <span className="text-xs text-slate-500">Pet Type &amp; Breed</span>
+                      <span className="text-sm font-medium text-slate-900 text-right">{[info.petType, info.breed].filter(Boolean).join(' · ')}</span>
+                    </div>
+                  )}
+                  {(info.petGender || info.petColor || info.dateOfBirth) && (
+                    <div className="px-4 py-3 flex items-center justify-between gap-4">
+                      <span className="text-xs text-slate-500">Profile / Age / Markings</span>
+                      <span className="text-sm font-medium text-slate-900 text-right">{[info.petGender, info.dateOfBirth, info.petColor].filter(Boolean).join(' · ')}</span>
+                    </div>
+                  )}
+                  {info.microchipId && (
+                    <div className="px-4 py-3 flex items-center justify-between gap-4">
+                      <span className="text-xs text-slate-500">Microchip ID</span>
+                      <span className="text-sm font-mono font-semibold text-slate-900">{info.microchipId}</span>
+                    </div>
+                  )}
+                  {(info.vetName || info.vetPhone) && (
+                    <div className="px-4 py-3 flex items-center justify-between gap-4">
+                      <span className="text-xs text-slate-500">Veterinarian</span>
+                      <div className="text-right text-sm font-medium text-slate-900">
+                        {info.vetName && <div>{info.vetName}</div>}
+                        {info.vetPhone && <a href={`tel:${info.vetPhone}`} className="text-[#1D4ED8] font-mono text-xs">{info.vetPhone}</a>}
+                      </div>
+                    </div>
+                  )}
+                  {info.allergiesOrMedical && (
+                    <div className="px-4 py-3">
+                      <div className="text-xs font-semibold text-rose-700 inline-flex items-center gap-1.5"><HeartPulse className="h-3.5 w-3.5" />Medical Information / Allergies</div>
+                      <p className="mt-1 text-sm text-slate-800">{info.allergiesOrMedical}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Personal Belongings Recovery Panel */}
+          {profileType === 'belongings' && (
+            <div className="mt-6 space-y-3">
+              {(info.ownerName || info.ownerMobile || info.emergencyContactPhone) && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 space-y-2.5">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-900">
+                    <UserCheck className="h-4 w-4" />
+                    <span>Owner Recovery Contact</span>
+                  </div>
+                  {(info.ownerName || info.ownerMobile) && (
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-xs text-amber-800">Owner</div>
+                        <div className="text-sm font-semibold text-slate-900">{info.ownerName || 'Owner'}</div>
+                      </div>
+                      {info.ownerMobile && (
+                        <a
+                          href={`tel:${info.ownerMobile}`}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#0B1D3A] hover:bg-[#132A52] text-white text-xs font-semibold font-mono"
+                        >
+                          <Phone className="h-3.5 w-3.5" />
+                          <span>Call {info.ownerMobile}</span>
+                        </a>
+                      )}
+                    </div>
+                  )}
+                  {info.emergencyContactPhone && (
+                    <div className="flex items-center justify-between gap-3 pt-2 border-t border-amber-200/70">
+                      <div>
+                        <div className="text-xs text-amber-800">Alternate Contact</div>
+                        <div className="text-sm font-semibold text-slate-900">{info.emergencyContactName || 'Backup Contact'}</div>
+                      </div>
+                      <a
+                        href={`tel:${info.emergencyContactPhone}`}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-amber-300 text-amber-950 text-xs font-semibold font-mono"
+                      >
+                        <Phone className="h-3.5 w-3.5" />
+                        <span>{info.emergencyContactPhone}</span>
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {(info.itemCategory || info.brandModel || info.serialNumber || info.finderNotes) && (
+                <div className="rounded-2xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
+                  {info.itemCategory && (
+                    <div className="px-4 py-3 flex items-center justify-between gap-4">
+                      <span className="text-xs text-slate-500">Item Category</span>
+                      <span className="text-sm font-medium text-slate-900">{info.itemCategory}</span>
+                    </div>
+                  )}
+                  {info.brandModel && (
+                    <div className="px-4 py-3 flex items-center justify-between gap-4">
+                      <span className="text-xs text-slate-500">Brand / Model</span>
+                      <span className="text-sm font-medium text-slate-900 text-right">{info.brandModel}</span>
+                    </div>
+                  )}
+                  {info.serialNumber && (
+                    <div className="px-4 py-3 flex items-center justify-between gap-4">
+                      <span className="text-xs text-slate-500">Unique ID / Serial</span>
+                      <span className="text-sm font-mono font-semibold text-slate-900">{info.serialNumber}</span>
+                    </div>
+                  )}
+                  {info.finderNotes && (
+                    <div className="px-4 py-3">
+                      <div className="text-xs text-slate-500">Finder / Reward Instructions</div>
+                      <p className="mt-1 text-sm text-slate-800">{info.finderNotes}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Adult Emergency Contact, Blood Group & Optional Government IDs */}
+          {profileType === 'adult' &&
+            (info.bloodGroup || info.emergencyContactName || info.emergencyContactPhone || info.aadhaarNumber || info.panNumber) && (
+              <div className="mt-6 rounded-2xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
+                {info.bloodGroup && (
+                  <div className="px-4 py-3 flex items-center justify-between gap-4">
+                    <span className="text-xs text-slate-500 inline-flex items-center gap-1.5"><Droplets className="h-3.5 w-3.5 text-rose-600" />Blood Group</span>
+                    <span className="text-sm font-bold text-rose-700">{info.bloodGroup}</span>
+                  </div>
+                )}
+                {(info.emergencyContactName || info.emergencyContactPhone) && (
+                  <div className="px-4 py-3 flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-xs text-slate-500">
+                        Emergency Contact {info.emergencyContactRelation ? `(${info.emergencyContactRelation})` : ''}
+                      </div>
+                      <div className="text-sm font-medium text-slate-900">{info.emergencyContactName || 'Emergency Contact'}</div>
+                    </div>
+                    {info.emergencyContactPhone && (
+                      isPaidLive ? (
+                        <a href={`tel:${info.emergencyContactPhone}`} className="text-xs font-semibold font-mono text-[#1D4ED8] hover:underline">
+                          {info.emergencyContactPhone}
+                        </a>
+                      ) : (
+                        <span className="text-xs font-mono text-slate-500">{maskPhone(info.emergencyContactPhone)}</span>
+                      )
+                    )}
+                  </div>
+                )}
+                {info.aadhaarNumber && (
+                  <div className="px-4 py-3 flex items-center justify-between gap-4">
+                    <span className="text-xs text-slate-500">Aadhaar Number</span>
+                    <span className="text-sm font-mono text-slate-900">
+                      {isPaidLive ? info.aadhaarNumber : '•••• •••• ' + info.aadhaarNumber.slice(-4)}
+                    </span>
+                  </div>
+                )}
+                {info.panNumber && (
+                  <div className="px-4 py-3 flex items-center justify-between gap-4">
+                    <span className="text-xs text-slate-500">PAN Number</span>
+                    <span className="text-sm font-mono text-slate-900">
+                      {isPaidLive ? info.panNumber : '•••••' + info.panNumber.slice(-4)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
 
           {/* Connect Online (includes WhatsApp & Social Links) */}
           {((profile.socialLinks && profile.socialLinks.length > 0) || hasWhatsappItem) && (

@@ -21,8 +21,8 @@ export const PublicLayout: React.FC<{ children: React.ReactNode }> = ({ children
           : '/dashboard';
 
   const navLinks = [
+    { label: 'Shop', to: '/shop' },
     { label: 'How It Works', to: '/how-it-works' },
-    { label: 'Features', to: '/features' },
     { label: 'Card Designs', to: '/card-designs' },
     { label: 'Pricing', to: '/pricing' },
     { label: userRecord ? 'Portal' : 'Login', to: userRecord ? portalPath : '/login' },
@@ -97,6 +97,13 @@ export const PublicLayout: React.FC<{ children: React.ReactNode }> = ({ children
               </Link>
             ))}
             <Link
+              to="/features"
+              onClick={() => setMobileMenuOpen(false)}
+              className="block px-3 py-2.5 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 min-h-[44px]"
+            >
+              Features
+            </Link>
+            <Link
               to="/faq"
               onClick={() => setMobileMenuOpen(false)}
               className="block px-3 py-2.5 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 min-h-[44px]"
@@ -149,6 +156,7 @@ export const PublicLayout: React.FC<{ children: React.ReactNode }> = ({ children
           <div>
             <h3 className="text-sm font-semibold text-white mb-3">Platform</h3>
             <ul className="space-y-2 text-sm text-slate-400">
+              <li><Link to="/shop" className="hover:text-white transition-colors">Shop Smart Tags</Link></li>
               <li><Link to="/how-it-works" className="hover:text-white transition-colors">How It Works</Link></li>
               <li><Link to="/features" className="hover:text-white transition-colors">Features</Link></li>
               <li><Link to="/card-designs" className="hover:text-white transition-colors">Card Designs</Link></li>

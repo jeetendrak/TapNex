@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { MailCheck, Lock, UserPlus, LogIn, RefreshCw, ShieldAlert } from 'lucide-react';
 import { PublicLayout, TAPNEX_LOGO_URL } from '../../components/PublicLayout';
 import { useAuth } from '../../contexts/AuthContext';
@@ -34,6 +34,14 @@ function routeForRole(role: UserRole): string {
   return '/dashboard';
 }
 
+function getSafeRedirectTarget(searchParams: URLSearchParams, role: UserRole): string {
+  const raw = searchParams.get('redirect') || '';
+  if (raw.startsWith('/') && !raw.startsWith('//')) {
+    return raw;
+  }
+  return routeForRole(role);
+}
+
 function mapAuthError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   if (msg.includes('auth/operation-not-allowed')) {
@@ -58,6 +66,7 @@ export const LoginPage: React.FC = () => {
   const { loginWithGoogle, loginWithEmail } = useAuth();
   const { notify } = useToast();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -70,7 +79,7 @@ export const LoginPage: React.FC = () => {
     try {
       const user = await loginWithGoogle();
       notify('Signed in', `Welcome back, ${user.displayName || user.email}`, 'success');
-      navigate(routeForRole(user.role));
+      navigate(getSafeRedirectTarget(searchParams, user.role));
     } catch (err) {
       setErrorMsg(mapAuthError(err));
     } finally {
@@ -89,7 +98,7 @@ export const LoginPage: React.FC = () => {
         return;
       }
       notify('Signed in', `Welcome back, ${user.displayName || user.email}`, 'success');
-      navigate(routeForRole(user.role));
+      navigate(getSafeRedirectTarget(searchParams, user.role));
     } catch (err) {
       setErrorMsg(mapAuthError(err));
     } finally {
@@ -186,6 +195,7 @@ export const RegisterPage: React.FC = () => {
   const { loginWithGoogle, registerWithEmail } = useAuth();
   const { notify } = useToast();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -199,7 +209,7 @@ export const RegisterPage: React.FC = () => {
     try {
       const user = await loginWithGoogle();
       notify('Account ready', 'Signed in with Google.', 'success');
-      navigate(routeForRole(user.role));
+      navigate(getSafeRedirectTarget(searchParams, user.role));
     } catch (err) {
       setErrorMsg(mapAuthError(err));
     } finally {

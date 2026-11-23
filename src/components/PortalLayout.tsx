@@ -17,6 +17,7 @@ import {
   X,
   ExternalLink,
   BookOpen,
+  ShoppingBag,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { TAPNEX_LOGO_URL } from './PublicLayout';
@@ -100,6 +101,7 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ portal, title, child
       icon: FileText,
       activePrefixes: ['/admin/card-designs', '/admin/approved-designs'],
     },
+    { label: 'Shop & Smart Tags', to: '/admin/shop', icon: ShoppingBag },
     {
       label: 'Orders, Payments & Shipping',
       to: '/admin/orders',
@@ -138,6 +140,7 @@ export const PortalLayout: React.FC<PortalLayoutProps> = ({ portal, title, child
         '/admin/card-designs',
       ],
     },
+    { label: 'Shop & Smart Tags', to: '/admin/shop', icon: ShoppingBag },
     { label: 'URL QR Generator', to: '/superadmin/qr-generator', icon: QrCode },
     {
       label: 'Gateways & System Settings',

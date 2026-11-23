@@ -14,9 +14,14 @@ import {
 } from 'lucide-react';
 import { PublicLayout } from '../../components/PublicLayout';
 import { CardCanvasPreview } from '../../components/CardCanvasPreview';
-import { BLANK_CARD_TEMPLATE, DEFAULT_CARD_TEMPLATES } from '../../lib/constants';
-import { getCardTemplates } from '../../lib/firestoreService';
-import type { CardTemplateRecord } from '../../types';
+import {
+  BLANK_CARD_TEMPLATE,
+  DEFAULT_CARD_TEMPLATES,
+  DEFAULT_SHOP_CATEGORIES,
+  DEFAULT_SHOP_PRODUCTS,
+} from '../../lib/constants';
+import { getCardTemplates, getShopCategories, getShopProducts } from '../../lib/firestoreService';
+import type { CardTemplateRecord, ShopCategoryRecord, ShopProductRecord } from '../../types';
 
 const HERO_IMG = '/src/assets/images/hero_nfc_tap_1794820570201.jpg';
 const SHOWCASE_IMG = '/src/assets/images/card_showcase_navy_1794820572938.jpg';
@@ -101,6 +106,10 @@ export const HomePage: React.FC = () => {
   );
   const [selectedTpl, setSelectedTpl] = useState<CardTemplateRecord>(initialDefault);
   const [openFaq, setOpenFaq] = useState<number | null>(0);
+  const [featuredShopProducts, setFeaturedShopProducts] = useState<ShopProductRecord[]>(
+    DEFAULT_SHOP_PRODUCTS.slice(0, 4)
+  );
+  const [shopCategories, setShopCategories] = useState<ShopCategoryRecord[]>(DEFAULT_SHOP_CATEGORIES);
 
   useEffect(() => {
     getCardTemplates().then((list) => {
@@ -109,6 +118,12 @@ export const HomePage: React.FC = () => {
         setSelectedTpl(list.find((t) => t.isDefault) || list[0]);
       } else {
         setSelectedTpl(BLANK_CARD_TEMPLATE);
+      }
+    });
+    Promise.all([getShopProducts(false), getShopCategories(false)]).then(([prods, cats]) => {
+      setShopCategories(cats);
+      if (prods.length > 0) {
+        setFeaturedShopProducts(prods.slice(0, 4));
       }
     });
   }, []);
@@ -136,12 +151,12 @@ export const HomePage: React.FC = () => {
                 <span>Get Your Smart Card</span>
                 <ArrowRight className="h-4 w-4" />
               </Link>
-              <a
-                href="#how-it-works"
+              <Link
+                to="/shop"
                 className="inline-flex items-center justify-center gap-2 px-6 py-3.5 text-sm font-semibold text-[#0B1D3A] bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors whitespace-nowrap"
               >
-                <span>See How It Works</span>
-              </a>
+                <span>Shop Smart Tags</span>
+              </Link>
             </div>
             <div className="mt-8 pt-6 border-t border-slate-200 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-slate-500">
               <span>300 DPI Print + 3 mm Bleed</span>
@@ -368,6 +383,71 @@ export const HomePage: React.FC = () => {
                 />
               </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 4B. Smart Safety Tags & Accessories Shop Showcase */}
+      <section className="py-16 lg:py-20 bg-white border-b border-slate-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10">
+            <div>
+              <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#0B1D3A] tracking-tight">
+                Smart Safety Tags &amp; Recovery Stickers
+              </h2>
+              <p className="mt-2 text-slate-600 max-w-2xl text-sm sm:text-base">
+                Protect helmets, kids school bags, pets, and personal gear with scannable SMART tags linked to your digital profile.
+              </p>
+            </div>
+            <Link
+              to="/shop"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#1D4ED8] hover:underline whitespace-nowrap"
+            >
+              <span>Browse All Smart Tags</span>
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            {featuredShopProducts.map((item) => {
+              const catName =
+                shopCategories.find((c) => c.categoryId === item.categoryId)?.name ||
+                item.categoryName ||
+                'Smart Tag';
+              return (
+                <Link
+                  key={item.productId}
+                  to={`/shop?category=${encodeURIComponent(item.categoryId)}`}
+                  className="group bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden flex flex-col justify-between hover:shadow-md hover:border-blue-300 transition-all"
+                >
+                  <div>
+                    <div className="aspect-[4/3] bg-slate-100 overflow-hidden">
+                      <img
+                        src={item.imageDataUrl}
+                        alt={item.name}
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      />
+                    </div>
+                    <div className="p-4">
+                      <div className="text-[11px] font-semibold text-[#1D4ED8] truncate">
+                        {catName}
+                      </div>
+                      <h3 className="mt-1 font-display text-base font-bold text-[#0B1D3A] leading-snug line-clamp-2">
+                        {item.name}
+                      </h3>
+                    </div>
+                  </div>
+                  <div className="px-4 pb-4 flex items-center justify-between">
+                    <span className="font-display text-lg font-extrabold text-[#0B1D3A] tabular-nums">
+                      ₹{item.priceInr}
+                    </span>
+                    <span className="text-xs font-semibold text-[#1D4ED8] group-hover:underline">
+                      View Tag →
+                    </span>
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         </div>
       </section>

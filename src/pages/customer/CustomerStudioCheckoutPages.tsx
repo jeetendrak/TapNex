@@ -94,6 +94,7 @@ import type {
   PaymentGatewayId,
   PaymentRecord,
   ProfileRecord,
+  ProfileType,
   QrCodeRecord,
   SupportTicketRecord,
 } from '../../types';
@@ -164,6 +165,7 @@ export const CustomerCardStudioPage: React.FC = () => {
   const navigate = useNavigate();
 
   const [templates, setTemplates] = useState<CardTemplateRecord[]>(DEFAULT_CARD_TEMPLATES);
+  const [templateProfileFilter, setTemplateProfileFilter] = useState<'recommended' | 'all' | ProfileType>('recommended');
   const [profiles, setProfiles] = useState<ProfileRecord[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<ProfileRecord | null>(null);
   const [mode, setMode] = useState<'default' | 'custom'>('default');
@@ -226,7 +228,14 @@ export const CustomerCardStudioPage: React.FC = () => {
       ? extractTimestampMs(matchingSaved.updatedAt) || extractTimestampMs(matchingSaved.createdAt)
       : 0;
 
-    const defaultFallback = activeList.find((t) => t.isDefault) || activeList[0] || BLANK_CARD_TEMPLATE;
+    const activeProfileType: ProfileType = prof?.profileType || 'adult';
+    const typeMatchedTemplate =
+      activeProfileType !== 'adult'
+        ? activeList.find((t) => t.profileType === activeProfileType && t.isDefault) ||
+          activeList.find((t) => t.profileType === activeProfileType)
+        : undefined;
+    const defaultFallback =
+      typeMatchedTemplate || activeList.find((t) => t.isDefault) || activeList[0] || BLANK_CARD_TEMPLATE;
 
     if (localDraft && (!matchingSaved || localDraft.updatedMs >= savedMs)) {
       const matchedTpl =
@@ -308,8 +317,18 @@ export const CustomerCardStudioPage: React.FC = () => {
     }));
   }, [selectedProfile]);
 
+  const activeStudioProfileType: ProfileType = selectedProfile?.profileType || 'adult';
+  const filteredTemplatesByType = templates.filter((t) => {
+    if (t.templateId === BLANK_CARD_TEMPLATE.templateId) return false;
+    if (templateProfileFilter === 'all') return true;
+    if (templateProfileFilter === 'recommended') {
+      return !t.profileType || t.profileType === 'all' || t.profileType === activeStudioProfileType;
+    }
+    return t.profileType === templateProfileFilter || t.profileType === 'all';
+  });
+
   const allDropdownTemplates: CardTemplateRecord[] = [
-    ...templates.filter((t) => t.templateId !== BLANK_CARD_TEMPLATE.templateId),
+    ...filteredTemplatesByType,
     BLANK_CARD_TEMPLATE,
   ];
 
@@ -627,30 +646,72 @@ export const CustomerCardStudioPage: React.FC = () => {
     if (editingTextId === id) setEditingTextId(null);
   };
 
-  // Build list of filled profile fields available for quick toggle into card layout
+  // Build list of filled profile fields available for quick toggle into card layout (tailored by profileType)
   const pi = selectedProfile?.personalInformation;
-  const builtInFieldOptions: ProfileCardFieldOption[] = [
-    { key: 'fullName', label: 'Full Name', previewValue: pi?.fullName || '', insertText: '{{FULL_NAME}}', defaultFontSizePt: 13, defaultBold: true },
-    { key: 'jobTitle', label: 'Job Title', previewValue: pi?.jobTitle || '', insertText: '{{JOB_TITLE}}', defaultFontSizePt: 9 },
-    { key: 'companyName', label: 'Company Name', previewValue: pi?.companyName || '', insertText: '{{COMPANY}}', defaultFontSizePt: 9, defaultBold: true },
-    { key: 'businessCategory', label: 'Business Category', previewValue: pi?.businessCategory || '', insertText: '{{BUSINESS_CATEGORY}}', defaultFontSizePt: 8 },
-    { key: 'mobile', label: 'Mobile Number', previewValue: pi?.mobile || '', insertText: '{{MOBILE}}', defaultFontSizePt: 8 },
-    { key: 'alternateMobile', label: 'Alternate Mobile', previewValue: pi?.alternateMobile || '', insertText: '{{ALTERNATE_MOBILE}}', defaultFontSizePt: 8 },
-    { key: 'whatsapp', label: 'WhatsApp Number', previewValue: pi?.whatsapp || '', insertText: '{{WHATSAPP}}', defaultFontSizePt: 8 },
-    { key: 'email', label: 'Email Address', previewValue: pi?.email || '', insertText: '{{EMAIL}}', defaultFontSizePt: 8 },
-    { key: 'alternateEmail', label: 'Alternate Email', previewValue: pi?.alternateEmail || '', insertText: '{{ALTERNATE_EMAIL}}', defaultFontSizePt: 8 },
-    { key: 'website', label: 'Website', previewValue: pi?.website || '', insertText: '{{WEBSITE}}', defaultFontSizePt: 8 },
-    {
-      key: 'cityState',
-      label: 'City & State',
-      previewValue: [pi?.city, pi?.state].filter(Boolean).join(', '),
-      insertText: '{{CITY_STATE}}',
-      defaultFontSizePt: 8,
-    },
-    { key: 'businessAddress', label: 'Business Address', previewValue: pi?.businessAddress || '', insertText: '{{ADDRESS}}', defaultFontSizePt: 8 },
-    { key: 'personalAddress', label: 'Personal Address', previewValue: pi?.personalAddress || '', insertText: '{{PERSONAL_ADDRESS}}', defaultFontSizePt: 8 },
-    { key: 'shortBio', label: 'Short Bio', previewValue: pi?.shortBio || '', insertText: '{{SHORT_BIO}}', defaultFontSizePt: 7.5 },
-  ];
+  const builtInFieldOptions: ProfileCardFieldOption[] =
+    activeStudioProfileType === 'kids'
+      ? [
+          { key: 'fullName', label: "Child's Full Name", previewValue: pi?.fullName || '', insertText: '{{FULL_NAME}}', defaultFontSizePt: 13, defaultBold: true },
+          { key: 'parentName', label: 'Parent / Guardian Name', previewValue: pi?.parentName || '', insertText: '{{PARENT_NAME}}', defaultFontSizePt: 9, defaultBold: true },
+          { key: 'parentMobile', label: 'Parent Mobile', previewValue: pi?.parentMobile || pi?.mobile || '', insertText: '{{PARENT_MOBILE}}', defaultFontSizePt: 8.5 },
+          { key: 'emergencyContactPhone', label: 'Emergency Helpline', previewValue: pi?.emergencyContactPhone || '', insertText: '{{EMERGENCY_PHONE}}', defaultFontSizePt: 8.5 },
+          { key: 'schoolOrClass', label: 'School / Class', previewValue: pi?.schoolOrClass || '', insertText: '{{SCHOOL_CLASS}}', defaultFontSizePt: 8 },
+          { key: 'bloodGroup', label: 'Blood Group', previewValue: pi?.bloodGroup || '', insertText: '{{BLOOD_GROUP}}', defaultFontSizePt: 8.5, defaultBold: true },
+          { key: 'allergiesOrMedical', label: 'Allergies / Medical Notes', previewValue: pi?.allergiesOrMedical || '', insertText: '{{ALLERGIES}}', defaultFontSizePt: 7.5 },
+          { key: 'personalAddress', label: 'Home / Pickup Address', previewValue: pi?.personalAddress || '', insertText: '{{PERSONAL_ADDRESS}}', defaultFontSizePt: 7.5 },
+          { key: 'cityState', label: 'City & State', previewValue: [pi?.city, pi?.state].filter(Boolean).join(', '), insertText: '{{CITY_STATE}}', defaultFontSizePt: 8 },
+          { key: 'shortBio', label: 'Safety / Pickup Note', previewValue: pi?.shortBio || '', insertText: '{{SHORT_BIO}}', defaultFontSizePt: 7.5 },
+        ]
+      : activeStudioProfileType === 'pets'
+        ? [
+            { key: 'fullName', label: 'Pet Name', previewValue: pi?.fullName || '', insertText: '{{FULL_NAME}}', defaultFontSizePt: 13, defaultBold: true },
+            { key: 'petType', label: 'Pet Type', previewValue: pi?.petType || '', insertText: '{{PET_TYPE}}', defaultFontSizePt: 9 },
+            { key: 'breed', label: 'Breed', previewValue: pi?.breed || '', insertText: '{{BREED}}', defaultFontSizePt: 8.5 },
+            { key: 'microchipId', label: 'Microchip / Tag ID', previewValue: pi?.microchipId || '', insertText: '{{MICROCHIP_ID}}', defaultFontSizePt: 8 },
+            { key: 'ownerName', label: 'Owner Name', previewValue: pi?.ownerName || '', insertText: '{{OWNER_NAME}}', defaultFontSizePt: 9, defaultBold: true },
+            { key: 'ownerMobile', label: 'Owner Mobile', previewValue: pi?.ownerMobile || pi?.mobile || '', insertText: '{{OWNER_MOBILE}}', defaultFontSizePt: 8.5 },
+            { key: 'vetPhone', label: 'Veterinarian Contact', previewValue: pi?.vetPhone || '', insertText: '{{VET_PHONE}}', defaultFontSizePt: 8 },
+            { key: 'allergiesOrMedical', label: 'Diet / Medical Notes', previewValue: pi?.allergiesOrMedical || '', insertText: '{{ALLERGIES}}', defaultFontSizePt: 7.5 },
+            { key: 'personalAddress', label: 'Home Address', previewValue: pi?.personalAddress || '', insertText: '{{PERSONAL_ADDRESS}}', defaultFontSizePt: 7.5 },
+            { key: 'cityState', label: 'City & State', previewValue: [pi?.city, pi?.state].filter(Boolean).join(', '), insertText: '{{CITY_STATE}}', defaultFontSizePt: 8 },
+          ]
+        : activeStudioProfileType === 'belongings'
+          ? [
+              { key: 'fullName', label: 'Owner / Item Label', previewValue: pi?.fullName || '', insertText: '{{FULL_NAME}}', defaultFontSizePt: 12, defaultBold: true },
+              { key: 'itemCategory', label: 'Item Category', previewValue: pi?.itemCategory || '', insertText: '{{ITEM_CATEGORY}}', defaultFontSizePt: 9 },
+              { key: 'brandModel', label: 'Brand / Model', previewValue: pi?.brandModel || '', insertText: '{{BRAND_MODEL}}', defaultFontSizePt: 8.5, defaultBold: true },
+              { key: 'serialNumber', label: 'Serial / Tag Reference', previewValue: pi?.serialNumber || '', insertText: '{{SERIAL_NUMBER}}', defaultFontSizePt: 8 },
+              { key: 'mobile', label: 'Owner Mobile', previewValue: pi?.mobile || '', insertText: '{{MOBILE}}', defaultFontSizePt: 8.5 },
+              { key: 'whatsapp', label: 'WhatsApp Number', previewValue: pi?.whatsapp || '', insertText: '{{WHATSAPP}}', defaultFontSizePt: 8 },
+              { key: 'email', label: 'Owner Email', previewValue: pi?.email || '', insertText: '{{EMAIL}}', defaultFontSizePt: 8 },
+              { key: 'finderNotes', label: 'Finder / Reward Instructions', previewValue: pi?.finderNotes || '', insertText: '{{FINDER_NOTES}}', defaultFontSizePt: 7.5 },
+              { key: 'personalAddress', label: 'Return Address', previewValue: pi?.personalAddress || '', insertText: '{{PERSONAL_ADDRESS}}', defaultFontSizePt: 7.5 },
+              { key: 'cityState', label: 'City & State', previewValue: [pi?.city, pi?.state].filter(Boolean).join(', '), insertText: '{{CITY_STATE}}', defaultFontSizePt: 8 },
+            ]
+          : [
+              { key: 'fullName', label: 'Full Name', previewValue: pi?.fullName || '', insertText: '{{FULL_NAME}}', defaultFontSizePt: 13, defaultBold: true },
+              { key: 'jobTitle', label: 'Job Title', previewValue: pi?.jobTitle || '', insertText: '{{JOB_TITLE}}', defaultFontSizePt: 9 },
+              { key: 'companyName', label: 'Company Name', previewValue: pi?.companyName || '', insertText: '{{COMPANY}}', defaultFontSizePt: 9, defaultBold: true },
+              { key: 'businessCategory', label: 'Business Category', previewValue: pi?.businessCategory || '', insertText: '{{BUSINESS_CATEGORY}}', defaultFontSizePt: 8 },
+              { key: 'mobile', label: 'Mobile Number', previewValue: pi?.mobile || '', insertText: '{{MOBILE}}', defaultFontSizePt: 8 },
+              { key: 'alternateMobile', label: 'Alternate Mobile', previewValue: pi?.alternateMobile || '', insertText: '{{ALTERNATE_MOBILE}}', defaultFontSizePt: 8 },
+              { key: 'whatsapp', label: 'WhatsApp Number', previewValue: pi?.whatsapp || '', insertText: '{{WHATSAPP}}', defaultFontSizePt: 8 },
+              { key: 'email', label: 'Email Address', previewValue: pi?.email || '', insertText: '{{EMAIL}}', defaultFontSizePt: 8 },
+              { key: 'alternateEmail', label: 'Alternate Email', previewValue: pi?.alternateEmail || '', insertText: '{{ALTERNATE_EMAIL}}', defaultFontSizePt: 8 },
+              { key: 'website', label: 'Website', previewValue: pi?.website || '', insertText: '{{WEBSITE}}', defaultFontSizePt: 8 },
+              { key: 'bloodGroup', label: 'Blood Group', previewValue: pi?.bloodGroup || '', insertText: '{{BLOOD_GROUP}}', defaultFontSizePt: 8 },
+              { key: 'emergencyContactPhone', label: 'Emergency Phone', previewValue: pi?.emergencyContactPhone || '', insertText: '{{EMERGENCY_PHONE}}', defaultFontSizePt: 8 },
+              {
+                key: 'cityState',
+                label: 'City & State',
+                previewValue: [pi?.city, pi?.state].filter(Boolean).join(', '),
+                insertText: '{{CITY_STATE}}',
+                defaultFontSizePt: 8,
+              },
+              { key: 'businessAddress', label: 'Business Address', previewValue: pi?.businessAddress || '', insertText: '{{ADDRESS}}', defaultFontSizePt: 8 },
+              { key: 'personalAddress', label: 'Personal Address', previewValue: pi?.personalAddress || '', insertText: '{{PERSONAL_ADDRESS}}', defaultFontSizePt: 8 },
+              { key: 'shortBio', label: 'Short Bio', previewValue: pi?.shortBio || '', insertText: '{{SHORT_BIO}}', defaultFontSizePt: 7.5 },
+            ];
 
   const customFieldOptions: ProfileCardFieldOption[] = (selectedProfile?.customFields || [])
     .filter((cf) => cf.label?.trim() || cf.value?.trim())
@@ -1643,6 +1704,33 @@ export const CustomerCardStudioPage: React.FC = () => {
                   <span className="text-[11px] font-mono text-slate-500">
                     {allDropdownTemplates.length} templates
                   </span>
+                </div>
+
+                {/* Profile Type Filter Tabs */}
+                <div className="flex flex-wrap gap-1.5">
+                  {(
+                    [
+                      { id: 'recommended', label: 'Recommended' },
+                      { id: 'all', label: 'All Types' },
+                      { id: 'adult', label: 'Adult' },
+                      { id: 'kids', label: 'Kids' },
+                      { id: 'pets', label: 'Pets' },
+                      { id: 'belongings', label: 'Belongings' },
+                    ] as const
+                  ).map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setTemplateProfileFilter(f.id)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors ${
+                        templateProfileFilter === f.id
+                          ? 'bg-[#0B1D3A] text-white border-[#0B1D3A]'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
                 </div>
 
                 <div>
@@ -3784,16 +3872,44 @@ export const CustomerOrdersPage: React.FC<{ initialTab?: 'orders' | 'tracking' }
                 <div className="text-xs text-slate-500">
                   Qty: {activeTrackedOrder.quantity} · {activeTrackedOrder.cardType}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => openOrderDesignPreview(activeTrackedOrder)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-sans font-semibold text-[#0B1D3A]"
-                >
-                  <Eye className="h-3.5 w-3.5 text-[#1D4ED8]" />
-                  <span>Preview Ordered Design</span>
-                </button>
+                {activeTrackedOrder.orderSource === 'shop' || activeTrackedOrder.designId === 'shop_direct' ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-100 text-xs font-sans font-semibold text-slate-700">
+                    Direct Smart Tag Shop Order
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => openOrderDesignPreview(activeTrackedOrder)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-sans font-semibold text-[#0B1D3A]"
+                  >
+                    <Eye className="h-3.5 w-3.5 text-[#1D4ED8]" />
+                    <span>Preview Ordered Design</span>
+                  </button>
+                )}
               </div>
             </div>
+
+            {activeTrackedOrder.shopItems && activeTrackedOrder.shopItems.length > 0 && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
+                <h3 className="font-display font-bold text-sm text-[#0B1D3A]">Ordered Smart Tags &amp; Products</h3>
+                <div className="divide-y divide-slate-100">
+                  {activeTrackedOrder.shopItems.map((item) => (
+                    <div key={item.productId} className="py-2.5 flex items-center justify-between gap-3 text-xs">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-[#0B1D3A]">{item.name}</div>
+                        <div className="text-slate-500">
+                          {[item.categoryName, item.cardType].filter(Boolean).join(' · ') || 'Smart Safety Tag'}
+                        </div>
+                      </div>
+                      <div className="text-right font-mono tabular-nums shrink-0">
+                        <div>{item.quantity} × ₹{item.priceInr}</div>
+                        <div className="font-semibold text-[#0B1D3A]">₹{item.lineTotal ?? item.priceInr * item.quantity}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <FulfilmentTimeline
               currentStatus={activeTrackedOrder.orderStatus}
@@ -3879,23 +3995,34 @@ export const CustomerOrdersPage: React.FC<{ initialTab?: 'orders' | 'tracking' }
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {orders.map((ord) => (
+              {orders.map((ord) => {
+                const isShopOrder = ord.orderSource === 'shop' || ord.designId === 'shop_direct';
+                return (
                 <tr key={ord.orderId} className="hover:bg-slate-50/70">
                   <td className="py-3 px-4 font-mono text-xs font-semibold text-[#0B1D3A]">{ord.orderNumber}</td>
-                  <td className="py-3 px-4 text-slate-700">{ord.cardType}</td>
+                  <td className="py-3 px-4 text-slate-700">
+                    <div>{ord.cardType}</div>
+                    {isShopOrder && ord.shopItems && ord.shopItems.length > 0 && (
+                      <div className="text-[11px] text-slate-500 truncate max-w-[240px]">
+                        {ord.shopItems.map((it) => `${it.quantity}× ${it.name}`).join(', ')}
+                      </div>
+                    )}
+                  </td>
                   <td className="py-3 px-4 font-mono tabular-nums">{ord.quantity}</td>
                   <td className="py-3 px-4 font-mono tabular-nums font-semibold">₹{ord.total}</td>
                   <td className="py-3 px-4 text-xs">{ord.paymentStatus}</td>
                   <td className="py-3 px-4 text-xs font-medium text-[#1D4ED8]">{ord.orderStatus}</td>
                   <td className="py-3 px-4 text-right space-x-3 whitespace-nowrap">
-                    <button
-                      type="button"
-                      onClick={() => openOrderDesignPreview(ord)}
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-[#1D4ED8] hover:underline"
-                    >
-                      <Eye className="h-3.5 w-3.5" />
-                      <span>Preview Design</span>
-                    </button>
+                    {!isShopOrder && (
+                      <button
+                        type="button"
+                        onClick={() => openOrderDesignPreview(ord)}
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-[#1D4ED8] hover:underline"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        <span>Preview Design</span>
+                      </button>
+                    )}
                     <Link
                       to={`/dashboard/orders/${ord.orderId}`}
                       className="text-xs font-semibold text-[#0B1D3A] hover:underline"
@@ -3904,7 +4031,8 @@ export const CustomerOrdersPage: React.FC<{ initialTab?: 'orders' | 'tracking' }
                     </Link>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

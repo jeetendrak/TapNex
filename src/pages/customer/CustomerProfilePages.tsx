@@ -30,9 +30,12 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import {
   calculateProfileCompletion,
+  copyProfileFieldsBySelection,
   createAdditionalProfile,
   deleteDigitalProfile,
+  ensureUniqueAutoProfileSlug,
   extractTimestampMs,
+  generateAutoProfileSlug,
   getCustomerOrders,
   getUserDesigns,
   getUserProfiles,
@@ -44,16 +47,27 @@ import {
   reconcileDeliveredOrdersToProfiles,
   sanitizeSlug,
   saveProfileAndSyncPublic,
+  type ReusableProfileFieldKey,
 } from '../../lib/firestoreService';
 import { sanitizeRichBioHtml } from '../../lib/richText';
 import { getActiveStudioDraft, resolveEffectiveCardDesign } from '../../lib/studioDraft';
-import { INDIAN_STATES, SOCIAL_PLATFORMS } from '../../lib/constants';
+import {
+  BELONGING_CATEGORY_OPTIONS,
+  BLOOD_GROUP_OPTIONS,
+  DEFAULT_VISIBILITY,
+  INDIAN_STATES,
+  PET_TYPE_OPTIONS,
+  PROFILE_TYPE_OPTIONS,
+  SOCIAL_PLATFORMS,
+} from '../../lib/constants';
 import type {
   CardDesignRecord,
   CustomFieldItem,
   CustomFieldType,
   OrderRecord,
+  PersonalInformation,
   ProfileRecord,
+  ProfileType,
   SocialLinkItem,
   SocialPlatformId,
 } from '../../types';
@@ -103,7 +117,15 @@ const WatermarkedProfileModal: React.FC<{
   if (!open) return null;
   const info = profile.personalInformation;
   const v = profile.visibilitySettings;
-  const addressParts = [info.businessAddress, info.city, info.state, info.pinCode, info.country].filter(Boolean);
+  const profileType: ProfileType = profile.profileType || 'adult';
+  const effectiveLive = isPaid || profileType !== 'adult';
+  const addressParts = [
+    info.businessAddress || (profileType !== 'adult' ? info.personalAddress : ''),
+    info.city,
+    info.state,
+    info.pinCode,
+    info.country,
+  ].filter(Boolean);
   const visibleSocials = (profile.socialLinks || []).filter((s) => {
     const explicitVis = v.socialLinks?.[s.id];
     return explicitVis !== undefined ? Boolean(explicitVis) : Boolean(s.enabled);
@@ -120,13 +142,13 @@ const WatermarkedProfileModal: React.FC<{
     >
       <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto bg-white rounded-3xl border border-slate-200 shadow-2xl">
         <ScreenProtectionShield
-          active={!isPaid}
+          active={!effectiveLive}
           watermarkLabel={
-            isPaid ? `TAPNEX PROTECTED · /p/${profile.slug}` : 'TAPNEX PREVIEW · PAYMENT PENDING'
+            effectiveLive ? `TAPNEX PROTECTED · /p/${profile.slug}` : 'TAPNEX PREVIEW · PAYMENT PENDING'
           }
         >
           {/* Diagonal Watermark Overlay when Payment is Pending */}
-          {!isPaid && (
+          {!effectiveLive && (
             <div
               aria-hidden="true"
               className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-around overflow-hidden opacity-20"
@@ -143,7 +165,7 @@ const WatermarkedProfileModal: React.FC<{
           )}
 
           <div className="sticky top-0 z-40 bg-[#050814] text-white px-5 py-4 flex items-center justify-between">
-            {isPaid && !profile.adminDisabled ? (
+            {effectiveLive && !profile.adminDisabled ? (
               <div className="flex items-center gap-2 text-xs font-semibold text-emerald-300">
                 <Check className="h-3.5 w-3.5" />
                 <span>Live Profile Preview · Active &amp; Unlocked</span>
@@ -155,7 +177,7 @@ const WatermarkedProfileModal: React.FC<{
               </div>
             )}
             <div className="flex items-center gap-2">
-              {isPaid && profile.isPublic && !profile.adminDisabled && (
+              {effectiveLive && profile.isPublic && !profile.adminDisabled && (
                 <a
                   href={`/p/${profile.slug}`}
                   target="_blank"
@@ -178,7 +200,7 @@ const WatermarkedProfileModal: React.FC<{
           </div>
 
           <div className="relative z-10 p-6 space-y-5">
-            {!isPaid && (
+            {!effectiveLive && (
               <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900">
                 Phone number, email ID, direct actions, and live share URL remain masked/locked until card payment is confirmed or approved by an admin.
               </div>
@@ -196,18 +218,38 @@ const WatermarkedProfileModal: React.FC<{
                   {(info.fullName || 'T')[0].toUpperCase()}
                 </div>
               )}
+              {profileType !== 'adult' && (
+                <div className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-[#1D4ED8]">
+                  {PROFILE_TYPE_OPTIONS.find((o) => o.id === profileType)?.label} Safety Profile
+                </div>
+              )}
               {v.fullName && (
-                <h3 className="mt-3 font-display text-xl font-bold text-[#0B1D3A]">
-                  {info.fullName || 'Your Full Name'}
+                <h3 className="mt-2 font-display text-xl font-bold text-[#0B1D3A]">
+                  {info.fullName || 'Your Name'}
                 </h3>
               )}
-              {(v.jobTitle || v.companyName) && (
+              {profileType === 'adult' && (v.jobTitle || v.companyName) && (
                 <p className="text-xs text-slate-600 mt-1">
                   {[v.jobTitle ? info.jobTitle : '', v.companyName ? info.companyName : ''].filter(Boolean).join(' · ')}
                 </p>
               )}
-              {v.businessCategory && info.businessCategory && (
+              {profileType === 'adult' && v.businessCategory && info.businessCategory && (
                 <p className="mt-0.5 text-[11px] text-slate-500">{info.businessCategory}</p>
+              )}
+              {profileType === 'kids' && (info.schoolOrClass || info.bloodGroup) && (
+                <p className="text-xs text-slate-600 mt-1">
+                  {[info.schoolOrClass, info.bloodGroup ? `Blood: ${info.bloodGroup}` : ''].filter(Boolean).join(' · ')}
+                </p>
+              )}
+              {profileType === 'pets' && (info.petType || info.breed) && (
+                <p className="text-xs text-slate-600 mt-1">
+                  {[info.petType, info.breed, info.petColor].filter(Boolean).join(' · ')}
+                </p>
+              )}
+              {profileType === 'belongings' && (info.itemCategory || info.brandModel) && (
+                <p className="text-xs text-slate-600 mt-1">
+                  {[info.itemCategory, info.brandModel].filter(Boolean).join(' · ')}
+                </p>
               )}
               {v.shortBio && info.shortBio && (
                 <div
@@ -218,59 +260,84 @@ const WatermarkedProfileModal: React.FC<{
             </div>
 
             <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl text-xs">
+              {profileType === 'kids' && (v.parentContact ?? true) && info.parentName && (
+                <div className="px-4 py-3 flex justify-between gap-3">
+                  <span className="text-slate-500">Parent / Guardian</span>
+                  <span className="font-semibold text-slate-800 text-right">
+                    {info.parentName} {info.parentMobile ? `· ${info.parentMobile}` : ''}
+                  </span>
+                </div>
+              )}
+              {(profileType === 'pets' || profileType === 'belongings') && (v.ownerContact ?? true) && info.ownerName && (
+                <div className="px-4 py-3 flex justify-between gap-3">
+                  <span className="text-slate-500">Owner</span>
+                  <span className="font-semibold text-slate-800 text-right">
+                    {info.ownerName} {info.ownerMobile ? `· ${info.ownerMobile}` : ''}
+                  </span>
+                </div>
+              )}
               {v.mobile && info.mobile && (
                 <div className="px-4 py-3 flex justify-between gap-3">
-                  <span className="text-slate-500">{isPaid ? 'Mobile' : 'Mobile (Masked)'}</span>
+                  <span className="text-slate-500">{effectiveLive ? 'Mobile' : 'Mobile (Masked)'}</span>
                   <span className="font-mono font-semibold text-slate-700 text-right">
-                    {isPaid ? info.mobile : maskPhone(info.mobile)}
+                    {effectiveLive ? info.mobile : maskPhone(info.mobile)}
+                  </span>
+                </div>
+              )}
+              {(v.emergencyContact ?? true) && info.emergencyContactPhone && (
+                <div className="px-4 py-3 flex justify-between gap-3">
+                  <span className="text-rose-600 font-medium">Emergency Contact</span>
+                  <span className="font-mono font-semibold text-slate-700 text-right">
+                    {info.emergencyContactName ? `${info.emergencyContactName} · ` : ''}
+                    {effectiveLive ? info.emergencyContactPhone : maskPhone(info.emergencyContactPhone)}
                   </span>
                 </div>
               )}
               {v.alternateMobile && info.alternateMobile && (
                 <div className="px-4 py-3 flex justify-between gap-3">
-                  <span className="text-slate-500">{isPaid ? 'Alternate Mobile' : 'Alternate Mobile (Masked)'}</span>
+                  <span className="text-slate-500">{effectiveLive ? 'Alternate Mobile' : 'Alternate Mobile (Masked)'}</span>
                   <span className="font-mono font-semibold text-slate-700 text-right">
-                    {isPaid ? info.alternateMobile : maskPhone(info.alternateMobile)}
+                    {effectiveLive ? info.alternateMobile : maskPhone(info.alternateMobile)}
                   </span>
                 </div>
               )}
               {v.email && info.email && (
                 <div className="px-4 py-3 flex justify-between gap-3">
-                  <span className="text-slate-500">{isPaid ? 'Email' : 'Email (Masked)'}</span>
+                  <span className="text-slate-500">{effectiveLive ? 'Email' : 'Email (Masked)'}</span>
                   <span className="font-mono font-semibold text-slate-700 truncate text-right">
-                    {isPaid ? info.email : maskEmail(info.email)}
+                    {effectiveLive ? info.email : maskEmail(info.email)}
                   </span>
                 </div>
               )}
               {v.alternateEmail && info.alternateEmail && (
                 <div className="px-4 py-3 flex justify-between gap-3">
-                  <span className="text-slate-500">{isPaid ? 'Alternate Email' : 'Alternate Email (Masked)'}</span>
+                  <span className="text-slate-500">{effectiveLive ? 'Alternate Email' : 'Alternate Email (Masked)'}</span>
                   <span className="font-mono font-semibold text-slate-700 truncate text-right">
-                    {isPaid ? info.alternateEmail : maskEmail(info.alternateEmail)}
+                    {effectiveLive ? info.alternateEmail : maskEmail(info.alternateEmail)}
                   </span>
                 </div>
               )}
-              {v.website && info.website && (
+              {profileType === 'adult' && v.website && info.website && (
                 <div className="px-4 py-3 flex justify-between gap-3">
-                  <span className="text-slate-500">{isPaid ? 'Website' : 'Website (Masked)'}</span>
+                  <span className="text-slate-500">{effectiveLive ? 'Website' : 'Website (Masked)'}</span>
                   <span className="font-semibold text-slate-700 truncate text-right">
-                    {isPaid ? info.website : '•••••.••'}
+                    {effectiveLive ? info.website : '•••••.••'}
                   </span>
                 </div>
               )}
-              {v.businessAddress && addressParts.length > 0 && (
+              {(v.businessAddress || (profileType !== 'adult' && v.personalAddress)) && addressParts.length > 0 && (
                 <div className="px-4 py-3 flex justify-between gap-3">
-                  <span className="text-slate-500 shrink-0">Business Address</span>
+                  <span className="text-slate-500 shrink-0">Address</span>
                   <span className="text-slate-600 text-right">
-                    {isPaid ? addressParts.join(', ') : `${info.city || 'India'} (Address masked)`}
+                    {effectiveLive ? addressParts.join(', ') : `${info.city || 'India'} (Address masked)`}
                   </span>
                 </div>
               )}
-              {v.personalAddress && info.personalAddress && (
+              {profileType === 'adult' && v.personalAddress && info.personalAddress && (
                 <div className="px-4 py-3 flex justify-between gap-3">
                   <span className="text-slate-500 shrink-0">Personal Address</span>
                   <span className="text-slate-600 text-right">
-                    {isPaid ? info.personalAddress : 'Personal address masked'}
+                    {effectiveLive ? info.personalAddress : 'Personal address masked'}
                   </span>
                 </div>
               )}
@@ -350,20 +417,94 @@ const WatermarkedProfileModal: React.FC<{
   );
 };
 
+const REUSABLE_FIELD_OPTIONS: {
+  key: ReusableProfileFieldKey;
+  label: string;
+}[] = [
+  { key: 'address', label: 'Address (Street, City, State, PIN)' },
+  { key: 'emergencyContact', label: 'Emergency Contact Details' },
+  { key: 'parentContact', label: 'Parent / Guardian Contact' },
+  { key: 'ownerContact', label: 'Owner Name & Contact' },
+  { key: 'mobile', label: 'Mobile & WhatsApp Number' },
+  { key: 'alternateMobile', label: 'Alternate Mobile Number' },
+  { key: 'email', label: 'Email Address' },
+  { key: 'website', label: 'Website' },
+];
+
 const CreateDigitalProfileModal: React.FC<{
   open: boolean;
   onClose: () => void;
   profilesCount: number;
+  existingProfiles?: ProfileRecord[];
   onCreated: (created: ProfileRecord) => Promise<void> | void;
-}> = ({ open, onClose, profilesCount, onCreated }) => {
+}> = ({ open, onClose, profilesCount, existingProfiles = [], onCreated }) => {
   const { userRecord } = useAuth();
   const { notify } = useToast();
+  const [profileType, setProfileType] = useState<ProfileType>('adult');
   const [newLabel, setNewLabel] = useState('');
+  const [subjectName, setSubjectName] = useState('');
   const [newSlug, setNewSlug] = useState('');
+  const [photoDataUrl, setPhotoDataUrl] = useState('');
+  const [pendingPhotoSrc, setPendingPhotoSrc] = useState('');
+  const [photoCropOpen, setPhotoCropOpen] = useState(false);
+  const [reuseFromId, setReuseFromId] = useState<string>('');
+  const [reuseSelection, setReuseSelection] = useState<Partial<Record<ReusableProfileFieldKey, boolean>>>({
+    address: true,
+    emergencyContact: true,
+    parentContact: true,
+    ownerContact: true,
+    mobile: true,
+    email: false,
+    alternateMobile: false,
+    website: false,
+  });
   const [modalSlugStatus, setModalSlugStatus] = useState<'idle' | 'available' | 'taken'>('idle');
   const [creatingProfile, setCreatingProfile] = useState(false);
 
+  useEffect(() => {
+    if (open) {
+      const defOption = PROFILE_TYPE_OPTIONS.find((o) => o.id === 'adult')!;
+      setProfileType('adult');
+      setNewLabel(profilesCount === 0 ? defOption.defaultLabel : '');
+      setSubjectName('');
+      setNewSlug(generateAutoProfileSlug(userRecord?.displayName || 'profile'));
+      setPhotoDataUrl('');
+      setPendingPhotoSrc('');
+      setReuseFromId('');
+      setModalSlugStatus('idle');
+    }
+  }, [open, profilesCount, userRecord?.displayName]);
+
   if (!open) return null;
+
+  const currentTypeOption =
+    PROFILE_TYPE_OPTIONS.find((o) => o.id === profileType) || PROFILE_TYPE_OPTIONS[0];
+
+  const handleTypeChange = (nextType: ProfileType) => {
+    const prevDef = PROFILE_TYPE_OPTIONS.find((o) => o.id === profileType)?.defaultLabel;
+    const nextOpt = PROFILE_TYPE_OPTIONS.find((o) => o.id === nextType)!;
+    setProfileType(nextType);
+    if (!newLabel || newLabel === prevDef) {
+      setNewLabel(nextOpt.defaultLabel);
+    }
+    setNewSlug(generateAutoProfileSlug(subjectName || nextOpt.id));
+    setModalSlugStatus('idle');
+  };
+
+  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const rawDataUrl = await readImageFileAsDataUrl(file);
+      const autoFitted = await autoFitImageToSquareDataUrl(rawDataUrl);
+      setPhotoDataUrl(autoFitted);
+      setPendingPhotoSrc(rawDataUrl);
+      setPhotoCropOpen(true);
+    } catch {
+      notify('Upload failed', 'Could not read selected image file.', 'error');
+    }
+  };
 
   const handleCheckModalSlug = async () => {
     const clean = sanitizeSlug(newSlug);
@@ -379,169 +520,303 @@ const CreateDigitalProfileModal: React.FC<{
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userRecord) return;
-    const labelToUse = newLabel.trim() || `Profile ${profilesCount + 1}`;
-    const rawSlug = newSlug.trim() || labelToUse;
-    const cleanSlug = sanitizeSlug(rawSlug);
-    if (cleanSlug.length < 3) {
-      notify('Custom slug too short', 'Please enter at least 3 letters/numbers for your custom profile URL slug.', 'error');
+    if (!subjectName.trim()) {
+      notify('Name required', `Please enter the ${currentTypeOption.nameLabel}.`, 'error');
       return;
     }
+    if (!photoDataUrl) {
+      notify(
+        'Photo required',
+        'Please upload a profile photo before creating this digital profile.',
+        'error'
+      );
+      return;
+    }
+
+    const labelToUse = newLabel.trim() || `${subjectName.trim()} (${currentTypeOption.label})`;
     setCreatingProfile(true);
     try {
-      const available = await isSlugAvailable(cleanSlug);
-      if (!available) {
-        setModalSlugStatus('taken');
-        notify('Slug already taken', 'Please pick a different custom slug for this digital profile.', 'error');
-        setCreatingProfile(false);
-        return;
+      let cleanSlug = sanitizeSlug(newSlug);
+      if (cleanSlug.length < 3 || !(await isSlugAvailable(cleanSlug))) {
+        cleanSlug = await ensureUniqueAutoProfileSlug(subjectName || labelToUse);
       }
+
+      const sourceProfile = existingProfiles.find((p) => p.profileId === reuseFromId);
+      const copiedFields: Partial<PersonalInformation> = sourceProfile
+        ? copyProfileFieldsBySelection(sourceProfile.personalInformation, reuseSelection)
+        : {};
+
+      const baseInfo: Partial<PersonalInformation> = {
+        ...copiedFields,
+        fullName: subjectName.trim(),
+        photoDataUrl,
+        ...(profileType === 'adult' && !copiedFields.email ? { email: userRecord.email || '' } : {}),
+      };
+
       const created = await createAdditionalProfile(
         userRecord.uid,
         labelToUse,
         cleanSlug,
-        { fullName: userRecord.displayName || '', email: userRecord.email || '' }
+        baseInfo,
+        profileType
       );
       localStorage.setItem(`tapnex_active_profile_${userRecord.uid}`, created.profileId);
-      setNewLabel('');
-      setNewSlug('');
-      setModalSlugStatus('idle');
       onClose();
       await onCreated(created);
     } catch (err) {
-      notify('Unable to create profile', err instanceof Error ? err.message : 'Try a different slug.', 'error');
+      notify('Unable to create profile', err instanceof Error ? err.message : 'Please try again.', 'error');
     } finally {
       setCreatingProfile(false);
     }
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-    >
-      <form
-        onSubmit={handleSubmit}
-        className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden"
+    <>
+      <div
+        className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4"
+        role="dialog"
+        aria-modal="true"
       >
-        <div className="px-6 py-4 bg-[#0B1D3A] text-white flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Plus className="h-4 w-4 text-cyan-300" />
-            <h3 className="font-display font-bold text-base">Create New Digital Profile</h3>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white"
-            aria-label="Close modal"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="p-6 space-y-4">
-          <p className="text-xs text-slate-600 leading-relaxed">
-            Choose a label and custom URL slug for your new digital card profile. We will open <strong>My Profile</strong> so you can fill in your details right away.
-          </p>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Profile Label *</label>
-            <input
-              type="text"
-              required
-              value={newLabel}
-              onChange={(e) => {
-                const val = e.target.value;
-                setNewLabel(val);
-                if (!newSlug || newSlug === sanitizeSlug(newLabel)) {
-                  setNewSlug(sanitizeSlug(val));
-                  setModalSlugStatus('idle');
-                }
-              }}
-              placeholder="e.g. Consulting, Real Estate, Personal"
-              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Custom Public URL Slug *</label>
-            <div className="flex gap-2">
-              <div className="flex flex-1 items-center border border-slate-300 rounded-lg overflow-hidden bg-slate-50">
-                <span className="px-2.5 text-xs font-mono text-slate-500 border-r border-slate-200 py-2.5">
-                  /p/
-                </span>
-                <input
-                  type="text"
-                  required
-                  value={newSlug}
-                  onChange={(e) => {
-                    setNewSlug(e.target.value.toLowerCase());
-                    setModalSlugStatus('idle');
-                  }}
-                  placeholder="jeet-consulting"
-                  className="flex-1 px-3 py-2 bg-white text-sm font-mono focus:outline-none"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={handleCheckModalSlug}
-                className="px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap"
-              >
-                Check
-              </button>
+        <form
+          onSubmit={handleSubmit}
+          className="w-full max-w-lg max-h-[92vh] flex flex-col bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden"
+        >
+          <div className="px-6 py-4 bg-[#0B1D3A] text-white flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2">
+              <Plus className="h-4 w-4 text-cyan-300" />
+              <h3 className="font-display font-bold text-base">Create New Digital Profile</h3>
             </div>
-            {modalSlugStatus === 'available' && (
-              <p className="mt-1 text-xs text-emerald-700 font-medium">Slug is available!</p>
-            )}
-            {modalSlugStatus === 'taken' && (
-              <p className="mt-1 text-xs text-rose-700 font-medium">Slug unavailable or shorter than 3 characters.</p>
-            )}
-          </div>
-
-          <div className="pt-2 flex items-center justify-end gap-2.5">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white"
+              aria-label="Close modal"
             >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={creatingProfile}
-              className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-[#1D4ED8] hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-50"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              <span>{creatingProfile ? 'Creating Profile...' : 'Create & Fill Profile Info'}</span>
+              <X className="h-4 w-4" />
             </button>
           </div>
-        </div>
-      </form>
-    </div>
+
+          <div className="p-6 space-y-4 overflow-y-auto">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Who is this profile for? *
+              </label>
+              <select
+                value={profileType}
+                onChange={(e) => handleTypeChange(e.target.value as ProfileType)}
+                className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-semibold text-[#0B1D3A] bg-white"
+              >
+                {PROFILE_TYPE_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.label} — {opt.description}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Mandatory Photo Upload */}
+            <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 flex items-center gap-4">
+              {photoDataUrl ? (
+                <img
+                  src={photoDataUrl}
+                  alt="Profile preview"
+                  className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-xs shrink-0"
+                />
+              ) : (
+                <div className="w-16 h-16 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center text-xs font-semibold shrink-0">
+                  Photo *
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-semibold text-[#0B1D3A]">
+                  Profile Photo <span className="text-rose-600">* Required</span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Upload a clear photo for this {currentTypeOption.label.toLowerCase()} profile.
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0B1D3A] text-white text-xs font-semibold hover:bg-[#132A52] cursor-pointer">
+                    <Upload className="h-3.5 w-3.5" />
+                    <span>{photoDataUrl ? 'Change Photo' : 'Upload Photo'}</span>
+                    <input type="file" accept="image/*" onChange={handlePhotoSelect} className="hidden" />
+                  </label>
+                  {photoDataUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPendingPhotoSrc(photoDataUrl);
+                        setPhotoCropOpen(true);
+                      }}
+                      className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      Crop / Frame
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  {currentTypeOption.nameLabel} *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={subjectName}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSubjectName(val);
+                  }}
+                  placeholder={`Enter ${currentTypeOption.nameLabel.toLowerCase()}`}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Profile Label *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newLabel}
+                  onChange={(e) => setNewLabel(e.target.value)}
+                  placeholder={currentTypeOption.defaultLabel}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-700">
+                  Public Shareable Profile Slug (Auto-Generated)
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewSlug(generateAutoProfileSlug(subjectName || profileType));
+                    setModalSlugStatus('idle');
+                  }}
+                  className="text-[11px] font-semibold text-[#1D4ED8] hover:underline"
+                >
+                  Auto-Generate New
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <div className="flex flex-1 items-center border border-slate-300 rounded-lg overflow-hidden bg-slate-50">
+                  <span className="px-2.5 text-xs font-mono text-slate-500 border-r border-slate-200 py-2">
+                    /p/
+                  </span>
+                  <input
+                    type="text"
+                    required
+                    value={newSlug}
+                    onChange={(e) => {
+                      setNewSlug(e.target.value.toLowerCase());
+                      setModalSlugStatus('idle');
+                    }}
+                    className="flex-1 px-3 py-2 bg-white text-sm font-mono focus:outline-none"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCheckModalSlug}
+                  className="px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap"
+                >
+                  Check
+                </button>
+              </div>
+              {modalSlugStatus === 'available' && (
+                <p className="mt-1 text-xs text-emerald-700 font-medium">Slug is available!</p>
+              )}
+              {modalSlugStatus === 'taken' && (
+                <p className="mt-1 text-xs text-rose-700 font-medium">
+                  Slug unavailable or shorter than 3 characters.
+                </p>
+              )}
+            </div>
+
+            {/* Family Profiles – Reuse Existing Information */}
+            {existingProfiles.length > 0 && (
+              <div className="p-4 rounded-xl border border-blue-200 bg-blue-50/50 space-y-3">
+                <div>
+                  <div className="text-xs font-bold text-[#0B1D3A]">
+                    Reuse Details from Existing Profile (Family / Quick Fill)
+                  </div>
+                  <p className="text-[11px] text-slate-600 mt-0.5">
+                    Copy selected contact, address, or emergency details into this new independent profile.
+                  </p>
+                </div>
+                <select
+                  value={reuseFromId}
+                  onChange={(e) => setReuseFromId(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white"
+                >
+                  <option value="">Start blank (do not copy from another profile)</option>
+                  {existingProfiles.map((p) => (
+                    <option key={p.profileId} value={p.profileId}>
+                      Copy from: {p.profileLabel || p.personalInformation.fullName || p.slug}
+                    </option>
+                  ))}
+                </select>
+
+                {reuseFromId && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
+                    {REUSABLE_FIELD_OPTIONS.map((opt) => (
+                      <label
+                        key={opt.key}
+                        className="inline-flex items-center gap-2 text-xs text-slate-700 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={Boolean(reuseSelection[opt.key])}
+                          onChange={(e) =>
+                            setReuseSelection((prev) => ({
+                              ...prev,
+                              [opt.key]: e.target.checked,
+                            }))
+                          }
+                          className="h-3.5 w-3.5 accent-[#1D4ED8] rounded"
+                        />
+                        <span>{opt.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="pt-2 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={creatingProfile}
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-[#1D4ED8] hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-50"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>{creatingProfile ? 'Creating Profile...' : 'Create Profile'}</span>
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+      <ProfilePhotoEditorModal
+        open={photoCropOpen}
+        imageSrc={pendingPhotoSrc || photoDataUrl}
+        onClose={() => setPhotoCropOpen(false)}
+        onSave={(croppedUrl) => setPhotoDataUrl(croppedUrl)}
+      />
+    </>
   );
 };
-
-function resizeImageToDataUrl(file: File, maxDim = 420): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.round(img.width * scale);
-        canvas.height = Math.round(img.height * scale);
-        const ctx = canvas.getContext('2d')!;
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', 0.85));
-      };
-      img.onerror = reject;
-      img.src = String(reader.result);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
 
 // 1. Customer Overview
 export const CustomerOverviewPage: React.FC = () => {
@@ -552,10 +827,6 @@ export const CustomerOverviewPage: React.FC = () => {
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [designs, setDesigns] = useState<CardDesignRecord[]>([]);
   const [addModalOpen, setAddModalOpen] = useState(false);
-  const [newLabel, setNewLabel] = useState('');
-  const [newSlug, setNewSlug] = useState('');
-  const [modalSlugStatus, setModalSlugStatus] = useState<'idle' | 'available' | 'taken'>('idle');
-  const [creatingProfile, setCreatingProfile] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [cardPreviewOpen, setCardPreviewOpen] = useState(false);
 
@@ -593,7 +864,8 @@ export const CustomerOverviewPage: React.FC = () => {
   const hasPaid =
     isOrderPaymentConfirmed(orders, activeProfile?.profileId, activeProfile?.slug) ||
     Boolean(activeProfile?.adminApproved) ||
-    Boolean(activeProfile?.paymentConfirmed);
+    Boolean(activeProfile?.paymentConfirmed) ||
+    Boolean(activeProfile && activeProfile.profileType && activeProfile.profileType !== 'adult');
   const isDisabledByAdmin = Boolean(activeProfile?.adminDisabled);
   const publicUrl =
     activeProfile && hasPaid && activeProfile.isPublic && !isDisabledByAdmin
@@ -601,60 +873,7 @@ export const CustomerOverviewPage: React.FC = () => {
       : '';
 
   const openAddProfileModal = () => {
-    setNewLabel('');
-    setNewSlug('');
-    setModalSlugStatus('idle');
     setAddModalOpen(true);
-  };
-
-  const handleCheckModalSlug = async () => {
-    const clean = sanitizeSlug(newSlug);
-    setNewSlug(clean);
-    if (clean.length < 3) {
-      setModalSlugStatus('taken');
-      return;
-    }
-    const ok = await isSlugAvailable(clean);
-    setModalSlugStatus(ok ? 'available' : 'taken');
-  };
-
-  const handleCreateProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!userRecord) return;
-    const labelToUse = newLabel.trim() || `Profile ${profiles.length + 1}`;
-    const rawSlug = newSlug.trim() || labelToUse;
-    const cleanSlug = sanitizeSlug(rawSlug);
-    if (cleanSlug.length < 3) {
-      notify('Custom slug too short', 'Please enter at least 3 letters/numbers for your custom profile URL slug.', 'error');
-      return;
-    }
-    setCreatingProfile(true);
-    try {
-      const available = await isSlugAvailable(cleanSlug);
-      if (!available) {
-        setModalSlugStatus('taken');
-        notify('Slug already taken', 'Please pick a different custom slug for this digital profile.', 'error');
-        setCreatingProfile(false);
-        return;
-      }
-      const created = await createAdditionalProfile(
-        userRecord.uid,
-        labelToUse,
-        cleanSlug,
-        { fullName: userRecord.displayName || '', email: userRecord.email || '' }
-      );
-      localStorage.setItem(`tapnex_active_profile_${userRecord.uid}`, created.profileId);
-      setNewLabel('');
-      setNewSlug('');
-      setAddModalOpen(false);
-      await reload();
-      notify('Digital profile created', `Now editing "${created.profileLabel}" — fill in your details below.`, 'success');
-      navigate('/dashboard/profile');
-    } catch (err) {
-      notify('Unable to create profile', err instanceof Error ? err.message : 'Try a different slug.', 'error');
-    } finally {
-      setCreatingProfile(false);
-    }
   };
 
   const handleDeleteProfile = async (target: ProfileRecord) => {
@@ -773,10 +992,10 @@ export const CustomerOverviewPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={openAddProfileModal}
-                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-[#1D4ED8] hover:bg-blue-700 text-white text-xs font-semibold whitespace-nowrap min-h-[40px]"
+                    className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-lg bg-[#1D4ED8] hover:bg-blue-700 text-white text-xs font-semibold shadow-sm whitespace-nowrap min-h-[40px]"
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    <span>Digital Profile</span>
+                    <span>Create Profile</span>
                   </button>
                 )}
                 {activeProfile && (
@@ -853,112 +1072,17 @@ export const CustomerOverviewPage: React.FC = () => {
             </div>
           </div>
 
-          {/* + Digital Profile Creation Modal -> Redirects to My Profile */}
-          {addModalOpen && (
-            <div
-              className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4"
-              role="dialog"
-              aria-modal="true"
-            >
-              <form
-                onSubmit={handleCreateProfile}
-                className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden"
-              >
-                <div className="px-6 py-4 bg-[#0B1D3A] text-white flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Plus className="h-4 w-4 text-cyan-300" />
-                    <h3 className="font-display font-bold text-base">Create New Digital Profile</h3>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setAddModalOpen(false)}
-                    className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white"
-                    aria-label="Close modal"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-
-                <div className="p-6 space-y-4">
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Choose a label and custom URL slug for your new digital card profile. We will take you straight to <strong>My Profile</strong> to fill in your details.
-                  </p>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Profile Label *</label>
-                    <input
-                      type="text"
-                      required
-                      value={newLabel}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setNewLabel(val);
-                        if (!newSlug || newSlug === sanitizeSlug(newLabel)) {
-                          setNewSlug(sanitizeSlug(val));
-                          setModalSlugStatus('idle');
-                        }
-                      }}
-                      placeholder="e.g. Consulting, Real Estate, Personal"
-                      className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Custom Public URL Slug *</label>
-                    <div className="flex gap-2">
-                      <div className="flex flex-1 items-center border border-slate-300 rounded-lg overflow-hidden bg-slate-50">
-                        <span className="px-2.5 text-xs font-mono text-slate-500 border-r border-slate-200 py-2.5">
-                          /p/
-                        </span>
-                        <input
-                          type="text"
-                          required
-                          value={newSlug}
-                          onChange={(e) => {
-                            setNewSlug(e.target.value.toLowerCase());
-                            setModalSlugStatus('idle');
-                          }}
-                          placeholder="jeet-consulting"
-                          className="flex-1 px-3 py-2 bg-white text-sm font-mono focus:outline-none"
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleCheckModalSlug}
-                        className="px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap"
-                      >
-                        Check
-                      </button>
-                    </div>
-                    {modalSlugStatus === 'available' && (
-                      <p className="mt-1 text-xs text-emerald-700 font-medium">Slug is available!</p>
-                    )}
-                    {modalSlugStatus === 'taken' && (
-                      <p className="mt-1 text-xs text-rose-700 font-medium">Slug unavailable or shorter than 3 characters.</p>
-                    )}
-                  </div>
-
-                  <div className="pt-2 flex items-center justify-end gap-2.5">
-                    <button
-                      type="button"
-                      onClick={() => setAddModalOpen(false)}
-                      className="px-4 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={creatingProfile}
-                      className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-[#1D4ED8] hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-50"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      <span>{creatingProfile ? 'Creating Profile...' : 'Create & Fill Profile Info'}</span>
-                    </button>
-                  </div>
-                </div>
-              </form>
-            </div>
-          )}
+          <CreateDigitalProfileModal
+            open={addModalOpen}
+            onClose={() => setAddModalOpen(false)}
+            profilesCount={profiles.length}
+            existingProfiles={profiles}
+            onCreated={async (created) => {
+              await reload();
+              notify('Digital profile created', `Now editing "${created.profileLabel}" — fill in your details below.`, 'success');
+              navigate('/dashboard/profile');
+            }}
+          />
 
           {activeProfile && (
             <WatermarkedProfileModal
@@ -1200,6 +1324,14 @@ export const CustomerProfilePage: React.FC = () => {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeProfile) return;
+    if (!activeProfile.personalInformation.photoDataUrl) {
+      notify(
+        'Profile photo required',
+        'Please upload a profile photo before saving this digital profile.',
+        'error'
+      );
+      return;
+    }
     const cleanSlug = sanitizeSlug(slugInput);
     if (cleanSlug.length < 3) {
       notify('Invalid slug', 'Public URL slug must be at least 3 characters.', 'error');
@@ -1219,7 +1351,7 @@ export const CustomerProfilePage: React.FC = () => {
       setActiveProfile(nextProfile);
       setPreviousSlug(cleanSlug);
       setSlugStatus('available');
-      notify('Profile saved', 'Your digital business profile and public projection are updated.', 'success');
+      notify('Profile saved', 'Your digital profile and public link are updated.', 'success');
     } catch (err) {
       notify('Save failed', err instanceof Error ? err.message : 'Unable to save profile.', 'error');
     } finally {
@@ -1253,7 +1385,7 @@ export const CustomerProfilePage: React.FC = () => {
           <div>
             <h2 className="font-display text-lg font-bold text-[#0B1D3A]">Create Your Digital Profile</h2>
             <p className="text-sm text-slate-600 mt-1 max-w-md mx-auto">
-              You don&apos;t have a digital profile yet. Create your profile right here to customize your public URL, contact details, photo, and SMART card.
+              You don&apos;t have a digital profile yet. Create a profile for Adult, Kids, Pets, or Personal Belongings right here.
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
@@ -1277,6 +1409,7 @@ export const CustomerProfilePage: React.FC = () => {
           open={createModalOpen}
           onClose={() => setCreateModalOpen(false)}
           profilesCount={profiles.length}
+          existingProfiles={profiles}
           onCreated={async (created) => {
             await reload();
             notify('Digital profile created', `Now editing "${created.profileLabel}".`, 'success');
@@ -1287,10 +1420,14 @@ export const CustomerProfilePage: React.FC = () => {
   }
 
   const info = activeProfile.personalInformation;
+  const activeProfileType: ProfileType = activeProfile.profileType || 'adult';
+  const activeTypeOption =
+    PROFILE_TYPE_OPTIONS.find((o) => o.id === activeProfileType) || PROFILE_TYPE_OPTIONS[0];
   const hasPaid =
     isOrderPaymentConfirmed(orders, activeProfile.profileId, activeProfile.slug) ||
     Boolean(activeProfile.adminApproved) ||
-    Boolean(activeProfile.paymentConfirmed);
+    Boolean(activeProfile.paymentConfirmed) ||
+    activeProfileType !== 'adult';
   const isDisabledByAdmin = Boolean(activeProfile.adminDisabled);
 
   const handleMarkPaymentDone = async () => {
@@ -1358,6 +1495,36 @@ export const CustomerProfilePage: React.FC = () => {
       <form onSubmit={handleSave} className="space-y-6">
         {/* Profile Photo & Slug */}
         <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+            <div>
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-[#1D4ED8]">
+                {activeTypeOption.label} Profile
+              </span>
+              <h2 className="font-display text-base font-bold text-[#0B1D3A]">
+                {activeProfile.profileLabel || activeTypeOption.defaultLabel}
+              </h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-slate-600">Profile Type:</label>
+              <select
+                value={activeProfileType}
+                onChange={(e) =>
+                  setActiveProfile({
+                    ...activeProfile,
+                    profileType: e.target.value as ProfileType,
+                  })
+                }
+                className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold bg-white text-[#0B1D3A]"
+              >
+                {PROFILE_TYPE_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           <div className="flex flex-col sm:flex-row sm:items-center gap-5">
             {info.photoDataUrl ? (
               <img
@@ -1374,7 +1541,7 @@ export const CustomerProfilePage: React.FC = () => {
               <div className="flex flex-wrap items-center gap-2">
                 <label className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">
                   <Upload className="h-3.5 w-3.5" />
-                  <span>{info.photoDataUrl ? 'Replace Photo' : 'Upload Profile Photo'}</span>
+                  <span>{info.photoDataUrl ? 'Replace Photo *' : 'Upload Profile Photo * Required'}</span>
                   <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
                 </label>
                 {info.photoDataUrl && (
@@ -1392,7 +1559,7 @@ export const CustomerProfilePage: React.FC = () => {
                 )}
               </div>
               <p className="mt-1.5 text-xs text-slate-500">
-                Photos auto-fit to the circle frame on upload and preserve transparent PNG backgrounds. Click <strong>Edit / Crop &amp; Resize Photo</strong> anytime to zoom, drag, or fit your full photo.
+                <strong className="text-rose-600">* Photo required.</strong> Auto-fits to circle frame and preserves transparent PNG backgrounds.
               </p>
             </div>
           </div>
@@ -1415,7 +1582,7 @@ export const CustomerProfilePage: React.FC = () => {
                       setSlugStatus('idle');
                     }}
                     className="flex-1 px-3 py-2 bg-white text-sm font-mono focus:outline-none"
-                    placeholder="jeet-kulkarni"
+                    placeholder="tpnx-profile"
                   />
                 </div>
                 <button
@@ -1456,7 +1623,7 @@ export const CustomerProfilePage: React.FC = () => {
                     {hasPaid && !isDisabledByAdmin ? (
                       <>
                         <Check className="h-3.5 w-3.5 text-emerald-600" />
-                        <span>Public Profile Link (Active &amp; Unlocked)</span>
+                        <span>Public Profile Link (Active &amp; Unlocked — No Login Needed)</span>
                       </>
                     ) : (
                       <>
@@ -1527,7 +1694,7 @@ export const CustomerProfilePage: React.FC = () => {
           </div>
         </div>
 
-        {/* Contact Fields */}
+        {/* Dynamic Profile Fields Based on Profile Type */}
         <div className="bg-white border border-slate-200 rounded-2xl p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">Profile Label</label>
@@ -1536,11 +1703,13 @@ export const CustomerProfilePage: React.FC = () => {
               value={activeProfile.profileLabel || ''}
               onChange={(e) => setActiveProfile({ ...activeProfile, profileLabel: e.target.value })}
               className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
-              placeholder="Primary Business Profile"
+              placeholder={activeTypeOption.defaultLabel}
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Full Name *</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              {activeTypeOption.nameLabel} *
+            </label>
             <input
               type="text"
               required
@@ -1549,55 +1718,330 @@ export const CustomerProfilePage: React.FC = () => {
               className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
             />
           </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Designation / Job Title</label>
-            <input
-              type="text"
-              value={info.jobTitle}
-              onChange={(e) => updateInfo('jobTitle', e.target.value)}
-              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Company Name</label>
-            <input
-              type="text"
-              value={info.companyName}
-              onChange={(e) => updateInfo('companyName', e.target.value)}
-              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Business Category</label>
-            <input
-              type="text"
-              value={info.businessCategory}
-              onChange={(e) => updateInfo('businessCategory', e.target.value)}
-              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
-              placeholder="e.g. Consulting, Real Estate, Technology"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Website</label>
-            <input
-              type="text"
-              value={info.website}
-              onChange={(e) => updateInfo('website', e.target.value)}
-              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
-              placeholder="https://yourcompany.com"
-            />
-          </div>
+
+          {activeProfileType === 'adult' && (
+            <>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Designation / Job Title</label>
+                <input
+                  type="text"
+                  value={info.jobTitle}
+                  onChange={(e) => updateInfo('jobTitle', e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Company Name</label>
+                <input
+                  type="text"
+                  value={info.companyName}
+                  onChange={(e) => updateInfo('companyName', e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Business Category</label>
+                <input
+                  type="text"
+                  value={info.businessCategory}
+                  onChange={(e) => updateInfo('businessCategory', e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                  placeholder="e.g. Consulting, Real Estate, Technology"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Website</label>
+                <input
+                  type="text"
+                  value={info.website}
+                  onChange={(e) => updateInfo('website', e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                  placeholder="https://yourcompany.com"
+                />
+              </div>
+            </>
+          )}
+
+          {activeProfileType === 'kids' && (
+            <>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Date of Birth / Age</label>
+                <input
+                  type="text"
+                  value={info.dateOfBirth || ''}
+                  onChange={(e) => updateInfo('dateOfBirth', e.target.value)}
+                  placeholder="e.g. 12 Aug 2017 (8 yrs)"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Blood Group</label>
+                <select
+                  value={info.bloodGroup || ''}
+                  onChange={(e) => updateInfo('bloodGroup', e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm bg-white"
+                >
+                  <option value="">Select Blood Group</option>
+                  {BLOOD_GROUP_OPTIONS.map((bg) => (
+                    <option key={bg} value={bg}>{bg}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Parent / Guardian Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={info.parentName || ''}
+                  onChange={(e) => updateInfo('parentName', e.target.value)}
+                  placeholder="Parent or guardian full name"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Parent / Guardian Mobile *</label>
+                <input
+                  type="tel"
+                  required
+                  value={info.parentMobile || ''}
+                  onChange={(e) => updateInfo('parentMobile', e.target.value)}
+                  placeholder="+91 9876543210"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">School / Class / Nursery</label>
+                <input
+                  type="text"
+                  value={info.schoolOrClass || ''}
+                  onChange={(e) => updateInfo('schoolOrClass', e.target.value)}
+                  placeholder="e.g. Delhi Public School · Grade 3"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Allergies / Medical Information</label>
+                <input
+                  type="text"
+                  value={info.allergiesOrMedical || ''}
+                  onChange={(e) => updateInfo('allergiesOrMedical', e.target.value)}
+                  placeholder="e.g. Peanut allergy, carries inhaler"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-medium text-slate-600 mb-1">Special Instructions for Helpers</label>
+                <input
+                  type="text"
+                  value={info.specialNotes || ''}
+                  onChange={(e) => updateInfo('specialNotes', e.target.value)}
+                  placeholder="e.g. Bus stop pickup instructions or alternate family reach"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+            </>
+          )}
+
+          {activeProfileType === 'pets' && (
+            <>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Pet Type *</label>
+                <select
+                  value={info.petType || 'Dog'}
+                  onChange={(e) => updateInfo('petType', e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm bg-white"
+                >
+                  {PET_TYPE_OPTIONS.map((pt) => (
+                    <option key={pt} value={pt}>{pt}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Breed</label>
+                <input
+                  type="text"
+                  value={info.breed || ''}
+                  onChange={(e) => updateInfo('breed', e.target.value)}
+                  placeholder="e.g. Golden Retriever / Persian Cat"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Age / DOB</label>
+                <input
+                  type="text"
+                  value={info.dateOfBirth || ''}
+                  onChange={(e) => updateInfo('dateOfBirth', e.target.value)}
+                  placeholder="e.g. 2 years"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Gender</label>
+                <select
+                  value={info.petGender || ''}
+                  onChange={(e) => updateInfo('petGender', e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm bg-white"
+                >
+                  <option value="">Select</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Color / Distinct Markings</label>
+                <input
+                  type="text"
+                  value={info.petColor || ''}
+                  onChange={(e) => updateInfo('petColor', e.target.value)}
+                  placeholder="e.g. Golden fawn with white chest"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Microchip ID (if any)</label>
+                <input
+                  type="text"
+                  value={info.microchipId || ''}
+                  onChange={(e) => updateInfo('microchipId', e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Owner Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={info.ownerName || ''}
+                  onChange={(e) => updateInfo('ownerName', e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Owner Mobile *</label>
+                <input
+                  type="tel"
+                  required
+                  value={info.ownerMobile || ''}
+                  onChange={(e) => updateInfo('ownerMobile', e.target.value)}
+                  placeholder="+91 9876543210"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Veterinarian / Clinic Name</label>
+                <input
+                  type="text"
+                  value={info.vetName || ''}
+                  onChange={(e) => updateInfo('vetName', e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Veterinarian Phone</label>
+                <input
+                  type="tel"
+                  value={info.vetPhone || ''}
+                  onChange={(e) => updateInfo('vetPhone', e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-mono"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-medium text-slate-600 mb-1">Medical / Allergy / Dietary Notes</label>
+                <input
+                  type="text"
+                  value={info.allergiesOrMedical || ''}
+                  onChange={(e) => updateInfo('allergiesOrMedical', e.target.value)}
+                  placeholder="e.g. Vaccinated, scared of loud noises, daily medication"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+            </>
+          )}
+
+          {activeProfileType === 'belongings' && (
+            <>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Item Category *</label>
+                <select
+                  value={info.itemCategory || 'Bag / Backpack'}
+                  onChange={(e) => updateInfo('itemCategory', e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm bg-white"
+                >
+                  {BELONGING_CATEGORY_OPTIONS.map((cat) => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Brand / Model / Color</label>
+                <input
+                  type="text"
+                  value={info.brandModel || ''}
+                  onChange={(e) => updateInfo('brandModel', e.target.value)}
+                  placeholder="e.g. MacBook Pro 14 Space Black"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Unique ID / Serial / Identifying Mark</label>
+                <input
+                  type="text"
+                  value={info.serialNumber || ''}
+                  onChange={(e) => updateInfo('serialNumber', e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Owner Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={info.ownerName || ''}
+                  onChange={(e) => updateInfo('ownerName', e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Owner Mobile *</label>
+                <input
+                  type="tel"
+                  required
+                  value={info.ownerMobile || ''}
+                  onChange={(e) => updateInfo('ownerMobile', e.target.value)}
+                  placeholder="+91 9876543210"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-mono"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-medium text-slate-600 mb-1">Finder / Return Instructions or Reward Message</label>
+                <input
+                  type="text"
+                  value={info.finderNotes || ''}
+                  onChange={(e) => updateInfo('finderNotes', e.target.value)}
+                  placeholder="e.g. Thank you for scanning! Please call or WhatsApp — reward on safe return."
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+            </>
+          )}
+
           <div className="md:col-span-2">
             <label className="block text-xs font-medium text-slate-600 mb-1">
-              Short Biography (Rich Formatting: Bold, Italic, Underline, Alignment &amp; Colors)
+              {activeProfileType === 'adult'
+                ? 'Short Biography (Rich Formatting: Bold, Italic, Underline, Alignment & Colors)'
+                : 'Profile Notes / About (Optional)'}
             </label>
             <RichBioEditor
               value={info.shortBio}
               onChange={(html) => updateInfo('shortBio', html)}
             />
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Mobile Number</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              {activeProfileType === 'adult' ? 'Mobile Number' : 'Primary Contact Mobile'}
+            </label>
             <input
               type="tel"
               value={info.mobile}
@@ -1667,68 +2111,74 @@ export const CustomerProfilePage: React.FC = () => {
               className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
             />
           </div>
+          {activeProfileType === 'adult' && (
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Alternate Email</label>
+              <input
+                type="email"
+                value={info.alternateEmail}
+                onChange={(e) => updateInfo('alternateEmail', e.target.value)}
+                className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+              />
+            </div>
+          )}
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Alternate Email</label>
-            <input
-              type="email"
-              value={info.alternateEmail}
-              onChange={(e) => updateInfo('alternateEmail', e.target.value)}
-              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Business Address</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              {activeProfileType === 'adult' ? 'Business Address' : 'Return / Residential Street Address'}
+            </label>
             <input
               type="text"
               value={info.businessAddress}
               onChange={(e) => updateInfo('businessAddress', e.target.value)}
               className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
-              placeholder="Office / Building / Street"
+              placeholder={activeProfileType === 'adult' ? 'Office / Building / Street' : 'Apartment / Street / Area'}
             />
           </div>
-          <div className="md:col-span-2">
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-              <label className="block text-xs font-medium text-slate-600">Personal Address</label>
-              <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#1D4ED8] cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={samePersonalAsBusiness}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setSamePersonalAsBusiness(checked);
-                    if (checked) {
-                      if (info.businessAddress) {
-                        setActiveProfile({
-                          ...activeProfile,
-                          personalInformation: { ...info, personalAddress: info.businessAddress },
-                        });
-                      } else if (info.personalAddress) {
-                        setActiveProfile({
-                          ...activeProfile,
-                          personalInformation: { ...info, businessAddress: info.personalAddress },
-                        });
+          {activeProfileType === 'adult' && (
+            <div className="md:col-span-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                <label className="block text-xs font-medium text-slate-600">Personal Address</label>
+                <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[#1D4ED8] cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={samePersonalAsBusiness}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setSamePersonalAsBusiness(checked);
+                      if (checked) {
+                        if (info.businessAddress) {
+                          setActiveProfile({
+                            ...activeProfile,
+                            personalInformation: { ...info, personalAddress: info.businessAddress },
+                          });
+                        } else if (info.personalAddress) {
+                          setActiveProfile({
+                            ...activeProfile,
+                            personalInformation: { ...info, businessAddress: info.personalAddress },
+                          });
+                        }
                       }
-                    }
-                  }}
-                  className="h-3.5 w-3.5 accent-[#1D4ED8] rounded"
-                />
-                <span>Same as Business Address</span>
-              </label>
+                    }}
+                    className="h-3.5 w-3.5 accent-[#1D4ED8] rounded"
+                  />
+                  <span>Same as Business Address</span>
+                </label>
+              </div>
+              <input
+                type="text"
+                value={samePersonalAsBusiness ? info.businessAddress : info.personalAddress || ''}
+                readOnly={samePersonalAsBusiness}
+                onChange={(e) => {
+                  if (samePersonalAsBusiness) return;
+                  updateInfo('personalAddress', e.target.value);
+                }}
+                className={`w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm ${
+                  samePersonalAsBusiness ? 'bg-slate-50 text-slate-600' : 'bg-white'
+                }`}
+                placeholder="Home / Residential Address"
+              />
             </div>
-            <input
-              type="text"
-              value={samePersonalAsBusiness ? info.businessAddress : info.personalAddress || ''}
-              readOnly={samePersonalAsBusiness}
-              onChange={(e) => {
-                if (samePersonalAsBusiness) return;
-                updateInfo('personalAddress', e.target.value);
-              }}
-              className={`w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm ${
-                samePersonalAsBusiness ? 'bg-slate-50 text-slate-600' : 'bg-white'
-              }`}
-              placeholder="Home / Residential Address"
-            />
-          </div>
+          )}
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">City</label>
             <input
@@ -1768,6 +2218,84 @@ export const CustomerProfilePage: React.FC = () => {
               onChange={(e) => updateInfo('country', e.target.value)}
               className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
             />
+          </div>
+
+          {/* Emergency Contact Section (All Types) + Adult Optional Govt IDs & Blood Group */}
+          <div className="md:col-span-2 pt-4 mt-2 border-t border-slate-200">
+            <h3 className="font-display font-bold text-sm text-[#0B1D3A] mb-3">
+              Emergency Contact {activeProfileType === 'adult' ? '& Medical / Identity Details (Optional)' : '& SOS Contact'}
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Emergency Contact Name</label>
+                <input
+                  type="text"
+                  value={info.emergencyContactName || ''}
+                  onChange={(e) => updateInfo('emergencyContactName', e.target.value)}
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Relation</label>
+                <input
+                  type="text"
+                  value={info.emergencyContactRelation || ''}
+                  onChange={(e) => updateInfo('emergencyContactRelation', e.target.value)}
+                  placeholder="e.g. Spouse, Parent, Sibling"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Emergency Phone</label>
+                <input
+                  type="tel"
+                  value={info.emergencyContactPhone || ''}
+                  onChange={(e) => updateInfo('emergencyContactPhone', e.target.value)}
+                  placeholder="+91 9876543210"
+                  className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-mono"
+                />
+              </div>
+
+              {activeProfileType === 'adult' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Blood Group (Optional)</label>
+                    <select
+                      value={info.bloodGroup || ''}
+                      onChange={(e) => updateInfo('bloodGroup', e.target.value)}
+                      className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm bg-white"
+                    >
+                      <option value="">Not specified</option>
+                      {BLOOD_GROUP_OPTIONS.map((bg) => (
+                        <option key={bg} value={bg}>{bg}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Aadhaar Number (Optional · Masked by Default)</label>
+                    <input
+                      type="text"
+                      maxLength={14}
+                      value={info.aadhaarNumber || ''}
+                      onChange={(e) => updateInfo('aadhaarNumber', e.target.value)}
+                      placeholder="XXXX XXXX 1234"
+                      className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">PAN Number (Optional · Hidden by Default)</label>
+                    <input
+                      type="text"
+                      maxLength={10}
+                      value={info.panNumber || ''}
+                      onChange={(e) => updateInfo('panNumber', e.target.value.toUpperCase())}
+                      placeholder="ABCDE1234F"
+                      className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm font-mono uppercase"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1837,6 +2365,7 @@ export const CustomerProfilePage: React.FC = () => {
         open={createModalOpen}
         onClose={() => setCreateModalOpen(false)}
         profilesCount={profiles.length}
+        existingProfiles={profiles}
         onCreated={async (created) => {
           await reload();
           notify('Digital profile created', `Now editing "${created.profileLabel}".`, 'success');
@@ -1955,6 +2484,7 @@ export const CustomerSocialLinksPage: React.FC = () => {
           open={createModalOpen}
           onClose={() => setCreateModalOpen(false)}
           profilesCount={profiles.length}
+          existingProfiles={profiles}
           onCreated={async () => { await reload(); }}
         />
       </PortalLayout>
@@ -2118,6 +2648,7 @@ export const CustomerSocialLinksPage: React.FC = () => {
           open={createModalOpen}
           onClose={() => setCreateModalOpen(false)}
           profilesCount={profiles.length}
+          existingProfiles={profiles}
           onCreated={async () => { await reload(); }}
         />
       </div>
@@ -2208,6 +2739,7 @@ export const CustomerCustomFieldsPage: React.FC = () => {
           open={createModalOpen}
           onClose={() => setCreateModalOpen(false)}
           profilesCount={profiles.length}
+          existingProfiles={profiles}
           onCreated={async () => { await reload(); }}
         />
       </PortalLayout>
@@ -2336,6 +2868,7 @@ export const CustomerCustomFieldsPage: React.FC = () => {
           open={createModalOpen}
           onClose={() => setCreateModalOpen(false)}
           profilesCount={profiles.length}
+          existingProfiles={profiles}
           onCreated={async () => { await reload(); }}
         />
       </div>
@@ -2401,16 +2934,19 @@ export const CustomerVisibilityPage: React.FC = () => {
           open={createModalOpen}
           onClose={() => setCreateModalOpen(false)}
           profilesCount={profiles.length}
+          existingProfiles={profiles}
           onCreated={async () => { await reload(); }}
         />
       </PortalLayout>
     );
   }
 
+  const activeProfileType: ProfileType = activeProfile.profileType || 'adult';
   const hasPaid =
     isOrderPaymentConfirmed(orders, activeProfile.profileId, activeProfile.slug) ||
     Boolean(activeProfile.adminApproved) ||
-    Boolean(activeProfile.paymentConfirmed);
+    Boolean(activeProfile.paymentConfirmed) ||
+    activeProfileType !== 'adult';
   const isDisabledByAdmin = Boolean(activeProfile.adminDisabled);
   const vis = activeProfile.visibilitySettings;
   const info = activeProfile.personalInformation;
@@ -2438,34 +2974,74 @@ export const CustomerVisibilityPage: React.FC = () => {
     });
   };
 
-  const fieldsList: {
+  const commonFields: {
     key: keyof Omit<ProfileRecord['visibilitySettings'], 'socialLinks'>;
     label: string;
     hasValue: boolean;
   }[] = [
     { key: 'photo', label: 'Profile Photo', hasValue: Boolean(info.photoDataUrl) },
-    { key: 'fullName', label: 'Full Name', hasValue: Boolean(info.fullName) },
-    { key: 'jobTitle', label: 'Job Title / Designation', hasValue: Boolean(info.jobTitle) },
-    { key: 'companyName', label: 'Company Name', hasValue: Boolean(info.companyName) },
-    { key: 'businessCategory', label: 'Business Category', hasValue: Boolean(info.businessCategory) },
-    { key: 'shortBio', label: 'Short Biography', hasValue: Boolean(info.shortBio) },
+    {
+      key: 'fullName',
+      label:
+        PROFILE_TYPE_OPTIONS.find((o) => o.id === activeProfileType)?.nameLabel || 'Full Name',
+      hasValue: Boolean(info.fullName),
+    },
+    { key: 'shortBio', label: 'Biography / Notes', hasValue: Boolean(info.shortBio) },
     { key: 'mobile', label: 'Mobile Number', hasValue: Boolean(info.mobile) },
     { key: 'whatsapp', label: 'WhatsApp', hasValue: Boolean(info.whatsapp) },
     { key: 'email', label: 'Email Address', hasValue: Boolean(info.email) },
-    { key: 'website', label: 'Website', hasValue: Boolean(info.website) },
     {
       key: 'businessAddress',
-      label: 'Business Address',
+      label: activeProfileType === 'adult' ? 'Business Address' : 'Return / Residential Address',
       hasValue: Boolean(info.businessAddress || info.city || info.state || info.pinCode),
     },
     {
-      key: 'personalAddress',
-      label: 'Personal Address',
-      hasValue: Boolean(info.personalAddress),
+      key: 'emergencyContact',
+      label: 'Emergency Contact',
+      hasValue: Boolean(info.emergencyContactPhone || info.emergencyContactName),
     },
     { key: 'alternateMobile', label: 'Alternate Mobile', hasValue: Boolean(info.alternateMobile) },
-    { key: 'alternateEmail', label: 'Alternate Email', hasValue: Boolean(info.alternateEmail) },
   ];
+
+  const typeSpecificFields: {
+    key: keyof Omit<ProfileRecord['visibilitySettings'], 'socialLinks'>;
+    label: string;
+    hasValue: boolean;
+  }[] =
+    activeProfileType === 'adult'
+      ? [
+          { key: 'jobTitle', label: 'Job Title / Designation', hasValue: Boolean(info.jobTitle) },
+          { key: 'companyName', label: 'Company Name', hasValue: Boolean(info.companyName) },
+          { key: 'businessCategory', label: 'Business Category', hasValue: Boolean(info.businessCategory) },
+          { key: 'website', label: 'Website', hasValue: Boolean(info.website) },
+          { key: 'personalAddress', label: 'Personal Address', hasValue: Boolean(info.personalAddress) },
+          { key: 'alternateEmail', label: 'Alternate Email', hasValue: Boolean(info.alternateEmail) },
+          { key: 'bloodGroup', label: 'Blood Group', hasValue: Boolean(info.bloodGroup) },
+          { key: 'aadhaarNumber', label: 'Aadhaar Number (Optional)', hasValue: Boolean(info.aadhaarNumber) },
+          { key: 'panNumber', label: 'PAN Number (Optional)', hasValue: Boolean(info.panNumber) },
+        ]
+      : activeProfileType === 'kids'
+        ? [
+            { key: 'parentContact', label: 'Parent / Guardian Contact', hasValue: Boolean(info.parentName || info.parentMobile) },
+            { key: 'bloodGroup', label: 'Blood Group', hasValue: Boolean(info.bloodGroup) },
+            { key: 'dateOfBirth', label: 'Date of Birth / Age', hasValue: Boolean(info.dateOfBirth) },
+            { key: 'schoolOrClass', label: 'School / Class', hasValue: Boolean(info.schoolOrClass) },
+            { key: 'medicalInfo', label: 'Allergies, Medical & Special Notes', hasValue: Boolean(info.allergiesOrMedical || info.specialNotes) },
+          ]
+        : activeProfileType === 'pets'
+          ? [
+              { key: 'petDetails', label: 'Pet Type, Breed, Markings & Microchip', hasValue: Boolean(info.petType || info.breed || info.microchipId) },
+              { key: 'ownerContact', label: 'Owner Name & Mobile', hasValue: Boolean(info.ownerName || info.ownerMobile) },
+              { key: 'vetContact', label: 'Veterinarian Contact', hasValue: Boolean(info.vetName || info.vetPhone) },
+              { key: 'medicalInfo', label: 'Medical & Allergy Notes', hasValue: Boolean(info.allergiesOrMedical) },
+            ]
+          : [
+              { key: 'itemDetails', label: 'Item Category, Brand & Serial ID', hasValue: Boolean(info.itemCategory || info.brandModel || info.serialNumber) },
+              { key: 'ownerContact', label: 'Owner Name & Mobile', hasValue: Boolean(info.ownerName || info.ownerMobile) },
+              { key: 'finderNotes', label: 'Finder & Reward Instructions', hasValue: Boolean(info.finderNotes) },
+            ];
+
+  const fieldsList = [...commonFields, ...typeSpecificFields];
 
   const handleCheckAll = () => {
     const nextSocialMap: Record<string, boolean> = {};
@@ -2477,6 +3053,7 @@ export const CustomerVisibilityPage: React.FC = () => {
         socialLinks: activeProfile.socialLinks.map((s) => ({ ...s, enabled: true })),
         customFields: activeProfile.customFields.map((c) => ({ ...c, visible: true })),
         visibilitySettings: {
+          ...DEFAULT_VISIBILITY,
           photo: true,
           fullName: true,
           jobTitle: true,
@@ -2491,6 +3068,17 @@ export const CustomerVisibilityPage: React.FC = () => {
           website: true,
           businessAddress: true,
           personalAddress: true,
+          emergencyContact: true,
+          bloodGroup: true,
+          dateOfBirth: true,
+          parentContact: true,
+          schoolOrClass: true,
+          medicalInfo: true,
+          petDetails: true,
+          ownerContact: true,
+          vetContact: true,
+          itemDetails: true,
+          finderNotes: true,
           socialLinks: nextSocialMap,
         },
       },
@@ -2725,6 +3313,7 @@ export const CustomerVisibilityPage: React.FC = () => {
         open={createModalOpen}
         onClose={() => setCreateModalOpen(false)}
         profilesCount={profiles.length}
+        existingProfiles={profiles}
         onCreated={async () => { await reload(); }}
       />
     </PortalLayout>

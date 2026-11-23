@@ -18,6 +18,7 @@ import {
   PricingPage,
 } from './pages/public/InfoPages';
 import { PublicProfilePage } from './pages/public/PublicProfilePage';
+import { ShopPage } from './pages/public/ShopPage';
 import { UserGuidePage } from './pages/public/UserGuidePage';
 
 // Auth Pages
@@ -70,6 +71,7 @@ import {
   AdminUserDetailPage,
   AdminUsersPage,
 } from './pages/admin/AdminPortalPages';
+import { AdminShopPage } from './pages/admin/AdminShopPage';
 
 // SuperAdmin Portal Pages
 import {
@@ -111,6 +113,7 @@ export default function App() {
             <Route path="/how-it-works" element={<HowItWorksPage />} />
             <Route path="/features" element={<FeaturesPage />} />
             <Route path="/pricing" element={<PricingPage />} />
+            <Route path="/shop" element={<ShopPage />} />
             <Route path="/card-designs" element={<CardDesignsPage />} />
             <Route path="/faq" element={<FaqPage />} />
             <Route path="/guide" element={<UserGuidePage />} />
@@ -341,6 +344,14 @@ export default function App() {
               element={
                 <ProtectedRoute allowedRoles={['ADMIN', 'SUPERADMIN']}>
                   <AdminCardTemplatesPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/shop"
+              element={
+                <ProtectedRoute allowedRoles={['ADMIN', 'SUPERADMIN']}>
+                  <AdminShopPage />
                 </ProtectedRoute>
               }
             />
