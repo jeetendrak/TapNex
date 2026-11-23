@@ -326,7 +326,14 @@ export const PublicProfilePage: React.FC = () => {
             )}
             {profileType === 'belongings' && (info.itemCategory || info.brandModel) && (
               <p className="mt-1 text-sm font-medium text-slate-600">
-                {[info.itemCategory, info.brandModel].filter(Boolean).join(' · ')}
+                {[
+                  info.itemCategory === 'Other' && info.itemCategoryOther?.trim()
+                    ? info.itemCategoryOther.trim()
+                    : info.itemCategory,
+                  info.brandModel,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
               </p>
             )}
             {info.shortBio && (
@@ -725,7 +732,11 @@ export const PublicProfilePage: React.FC = () => {
                   {info.itemCategory && (
                     <div className="px-4 py-3 flex items-center justify-between gap-4">
                       <span className="text-xs text-slate-500">Item Category</span>
-                      <span className="text-sm font-medium text-slate-900">{info.itemCategory}</span>
+                      <span className="text-sm font-medium text-slate-900 text-right">
+                        {info.itemCategory === 'Other' && info.itemCategoryOther?.trim()
+                          ? info.itemCategoryOther.trim()
+                          : info.itemCategory}
+                      </span>
                     </div>
                   )}
                   {info.brandModel && (

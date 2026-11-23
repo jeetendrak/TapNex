@@ -39,6 +39,7 @@ export interface RoleGuideSpec {
 }
 
 export interface RoleCapabilityRow {
+  roleId?: GuideRoleId;
   role: string;
   accessLevel: string;
   portalEntry: string;
@@ -47,6 +48,7 @@ export interface RoleCapabilityRow {
 
 export const ROLE_CAPABILITY_MATRIX: RoleCapabilityRow[] = [
   {
+    roleId: 'public',
     role: 'Public Visitor',
     accessLevel: 'No Login Required',
     portalEntry: '/ and /p/:slug',
@@ -54,6 +56,7 @@ export const ROLE_CAPABILITY_MATRIX: RoleCapabilityRow[] = [
       'Browse card designs & pricing, tap SMART card or scan QR to open /p/:slug without signing in, download vCard (.vcf), connect via WhatsApp/Socials under Connect Online, or Call/Email.',
   },
   {
+    roleId: 'customer',
     role: 'Customer (USER)',
     accessLevel: 'Verified Email / Google Sign-In',
     portalEntry: '/dashboard',
@@ -61,6 +64,7 @@ export const ROLE_CAPABILITY_MATRIX: RoleCapabilityRow[] = [
       'Create profiles from Overview or My Profile, use Rich Text Bio editor, mark payment completed to unmask/activate /p/:slug, design blank/preset cards (multi-select, 6-way align, snap guides, borders, color palette, arrow nudge, transparent PNG), pay via 6 gateways, track Orders.',
   },
   {
+    roleId: 'printer',
     role: 'Print Partner (PRINTER)',
     accessLevel: 'Admin-Onboarded Printer UID',
     portalEntry: '/printer/dashboard',
@@ -68,6 +72,7 @@ export const ROLE_CAPABILITY_MATRIX: RoleCapabilityRow[] = [
       'View assigned orders, export 1:1 WYSIWYG 300 DPI print-ready PDF (with 3mm bleed & crop marks) and 1024px QR, encode SMART chip URL, advance production, dispatch via courier.',
   },
   {
+    roleId: 'admin',
     role: 'Operations Admin (ADMIN)',
     accessLevel: 'Assigned by SuperAdmin',
     portalEntry: '/admin/dashboard',
@@ -75,6 +80,7 @@ export const ROLE_CAPABILITY_MATRIX: RoleCapabilityRow[] = [
       'Use grouped 6-item hubs to manage Users, Profiles & Printers, inspect full customer profile data, approve/mark payment completed or Disable/Enable /p/:slug links, test & toggle 6 payment gateways, Send Approved Designs to Print, and filter audit logs.',
   },
   {
+    roleId: 'superadmin',
     role: 'SuperAdmin (SUPERADMIN)',
     accessLevel: 'Root Governance Role',
     portalEntry: '/superadmin/dashboard',

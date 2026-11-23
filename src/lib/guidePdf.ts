@@ -42,6 +42,7 @@ async function loadLogoPngDataUrl(): Promise<{ dataUrl: string; aspect: number }
 
 export interface GenerateGuidePdfOptions {
   roleId?: GuideRoleId | 'all';
+  allowedRoleIds?: GuideRoleId[];
   onProgress?: (percent: number, status: string) => void;
 }
 
@@ -49,8 +50,12 @@ export async function generateGuidePdfBlob(
   options: GenerateGuidePdfOptions = {}
 ): Promise<{ blob: Blob; filename: string; pageCount: number }> {
   const targetRole = options.roleId || 'all';
+  const allowedSet = options.allowedRoleIds ? new Set<GuideRoleId>(options.allowedRoleIds) : null;
+  const permittedGuides = allowedSet
+    ? ROLE_GUIDES.filter((r) => allowedSet.has(r.roleId))
+    : ROLE_GUIDES;
   const selectedRoles: RoleGuideSpec[] =
-    targetRole === 'all' ? ROLE_GUIDES : ROLE_GUIDES.filter((r) => r.roleId === targetRole);
+    targetRole === 'all' ? permittedGuides : permittedGuides.filter((r) => r.roleId === targetRole);
 
   if (selectedRoles.length === 0) {
     throw new Error('No guide content found for the selected role.');
@@ -129,9 +134,14 @@ export async function generateGuidePdfBlob(
   pdf.setTextColor(255, 255, 255);
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(24);
+  const includesAdminRoles = selectedRoles.some(
+    (r) => r.roleId === 'admin' || r.roleId === 'superadmin'
+  );
   const coverTitle =
     targetRole === 'all'
-      ? 'Complete User & Operations Guide'
+      ? includesAdminRoles
+        ? 'Complete User & Operations Guide'
+        : 'Customer & Public Profile Guide'
       : `${selectedRoles[0].roleTitle} Guide`;
   pdf.text(coverTitle, marginX, 68);
 
@@ -140,7 +150,9 @@ export async function generateGuidePdfBlob(
   pdf.setFontSize(11.5);
   const coverSub =
     targetRole === 'all'
-      ? 'Role-by-role illustrated handbook with annotated screenshots covering Public Profiles, Customer Design Studio, Print Partners, Admin Operations, and SuperAdmin Governance.'
+      ? includesAdminRoles
+        ? 'Role-by-role illustrated handbook with annotated screenshots covering Public Profiles, Customer Design Studio, Print Partners, Admin Operations, and SuperAdmin Governance.'
+        : 'Illustrated step-by-step handbook with annotated screenshots covering Public Digital Profiles, Smart Safety Tags, Card Design Studio, Ordering, and Tracking.'
       : selectedRoles[0].overview;
   const subLines = pdf.splitTextToSize(coverSub, contentW) as string[];
   pdf.text(subLines, marginX, 79);
@@ -228,7 +240,9 @@ export async function generateGuidePdfBlob(
   pdf.setFont('helvetica', 'normal');
   pdf.setFontSize(9.5);
   pdf.text(
-    'Overview of authentication boundaries, entry routes, and responsibilities across all five TapNex user roles.',
+    includesAdminRoles
+      ? 'Overview of authentication boundaries, entry routes, and responsibilities across TapNex user roles.'
+      : 'Overview of entry routes and features for your TapNex customer and public profile workflows.',
     marginX,
     y
   );
@@ -246,7 +260,11 @@ export async function generateGuidePdfBlob(
   pdf.text('Primary Workflows', marginX + 109, y + 6);
   y += 9;
 
-  ROLE_CAPABILITY_MATRIX.forEach((row, idx) => {
+  const matrixRows = allowedSet
+    ? ROLE_CAPABILITY_MATRIX.filter((r) => !r.roleId || allowedSet.has(r.roleId))
+    : ROLE_CAPABILITY_MATRIX;
+
+  matrixRows.forEach((row, idx) => {
     const wfLines = pdf.splitTextToSize(row.primaryWorkflows, 66) as string[];
     const accessLines = pdf.splitTextToSize(row.accessLevel, 34) as string[];
     const routeLines = pdf.splitTextToSize(row.portalEntry, 31) as string[];

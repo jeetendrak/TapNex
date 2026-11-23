@@ -23,7 +23,7 @@ import { downloadBlob } from '../../lib/printPdf';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 
-const ROLE_TABS: Array<{ id: GuideRoleId | 'all'; label: string }> = [
+const ALL_ROLE_TABS: Array<{ id: GuideRoleId | 'all'; label: string }> = [
   { id: 'all', label: 'All Roles' },
   { id: 'public', label: 'Public Visitor' },
   { id: 'customer', label: 'Customer' },
@@ -32,9 +32,43 @@ const ROLE_TABS: Array<{ id: GuideRoleId | 'all'; label: string }> = [
   { id: 'superadmin', label: 'SuperAdmin' },
 ];
 
+export function getAllowedGuideRolesForUser(role?: string | null): GuideRoleId[] {
+  if (role === 'SUPERADMIN') return ['public', 'customer', 'printer', 'admin', 'superadmin'];
+  if (role === 'ADMIN') return ['public', 'customer', 'printer', 'admin'];
+  if (role === 'PRINTER') return ['public', 'customer', 'printer'];
+  return ['public', 'customer'];
+}
+
 export const UserGuidePage: React.FC = () => {
   const { userRecord } = useAuth();
   const { notify } = useToast();
+
+  const allowedRoleIds = useMemo(
+    () => getAllowedGuideRolesForUser(userRecord?.role),
+    [userRecord?.role]
+  );
+  const isStaffViewer =
+    userRecord?.role === 'ADMIN' ||
+    userRecord?.role === 'SUPERADMIN' ||
+    userRecord?.role === 'PRINTER';
+
+  const visibleRoleTabs = useMemo(
+    () =>
+      ALL_ROLE_TABS.filter((t) => t.id === 'all' || allowedRoleIds.includes(t.id)).map((t) =>
+        t.id === 'all' && !isStaffViewer ? { ...t, label: 'All My Guides' } : t
+      ),
+    [allowedRoleIds, isStaffViewer]
+  );
+
+  const visibleGuides = useMemo(
+    () => ROLE_GUIDES.filter((r) => allowedRoleIds.includes(r.roleId)),
+    [allowedRoleIds]
+  );
+
+  const visibleMatrixRows = useMemo(
+    () => ROLE_CAPABILITY_MATRIX.filter((row) => !row.roleId || allowedRoleIds.includes(row.roleId)),
+    [allowedRoleIds]
+  );
 
   const [activeRole, setActiveRole] = useState<GuideRoleId | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -44,10 +78,16 @@ export const UserGuidePage: React.FC = () => {
   const [lightbox, setLightbox] = useState<{ src: string; title: string; caption: string } | null>(null);
 
   useEffect(() => {
+    if (activeRole !== 'all' && !allowedRoleIds.includes(activeRole)) {
+      setActiveRole('all');
+    }
+  }, [activeRole, allowedRoleIds]);
+
+  useEffect(() => {
     let cancelled = false;
-    const allScenes = ROLE_GUIDES.flatMap((r) => r.features.map((f) => f.screenshotId));
+    const allowedScenes = visibleGuides.flatMap((r) => r.features.map((f) => f.screenshotId));
     Promise.all(
-      allScenes.map(async (sceneId) => {
+      allowedScenes.map(async (sceneId) => {
         const dataUrl = await renderGuideScreenshotDataUrl(sceneId);
         return [sceneId, dataUrl] as const;
       })
@@ -62,11 +102,11 @@ export const UserGuidePage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [visibleGuides]);
 
   const filteredRoles = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return ROLE_GUIDES.filter((role) => activeRole === 'all' || role.roleId === activeRole)
+    return visibleGuides.filter((role) => activeRole === 'all' || role.roleId === activeRole)
       .map((role) => {
         if (!q) return role;
         const roleMatches =
@@ -90,7 +130,7 @@ export const UserGuidePage: React.FC = () => {
         return { ...role, features: matchingFeatures };
       })
       .filter((role) => role.features.length > 0);
-  }, [activeRole, searchQuery]);
+  }, [visibleGuides, activeRole, searchQuery]);
 
   const handleDownloadPdf = async (roleId: GuideRoleId | 'all') => {
     setDownloadingTarget(roleId);
@@ -98,6 +138,7 @@ export const UserGuidePage: React.FC = () => {
     try {
       const { blob, filename, pageCount } = await generateGuidePdfBlob({
         roleId,
+        allowedRoleIds,
         onProgress: (pct, label) => setPdfProgress({ pct, label }),
       });
       downloadBlob(blob, filename);
@@ -115,7 +156,9 @@ export const UserGuidePage: React.FC = () => {
   };
 
   const activeRoleLabel =
-    ROLE_TABS.find((t) => t.id === activeRole)?.label || 'Complete Guide';
+    visibleRoleTabs.find((t) => t.id === activeRole)?.label || 'Complete Guide';
+
+  const totalVisibleShots = visibleGuides.reduce((sum, r) => sum + r.features.length, 0);
 
   const portalHome =
     userRecord?.role === 'SUPERADMIN'
@@ -136,17 +179,19 @@ export const UserGuidePage: React.FC = () => {
               <BookOpen className="h-4 w-4 text-[#1D4ED8]" />
               <span>Platform Documentation</span>
               <span aria-hidden="true">·</span>
-              <span>5 User Roles</span>
+              <span>{visibleGuides.length} {visibleGuides.length === 1 ? 'Section' : 'Guides'}</span>
               <span aria-hidden="true">·</span>
-              <span>8 Annotated Screenshots</span>
+              <span>{totalVisibleShots} Annotated Screenshots</span>
               <span aria-hidden="true">·</span>
               <span>Downloadable A4 PDF</span>
             </div>
             <h1 className="font-display text-3xl sm:text-4xl font-bold text-[#0B1D3A] tracking-tight">
-              TapNex Complete Role &amp; Feature Guide
+              {isStaffViewer ? 'TapNex Complete Role & Feature Guide' : 'TapNex User Guide & Card Handbook'}
             </h1>
             <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
-              Step-by-step illustrated handbook covering every workflow across Public Visitors, Customers, Print Partners, Operations Admins, and SuperAdmins—with annotated screen captures ready to download as a formatted PDF manual.
+              {isStaffViewer
+                ? 'Step-by-step illustrated handbook covering every workflow available to your account—with annotated screen captures ready to download as a formatted PDF manual.'
+                : 'Step-by-step illustrated handbook covering creating your Digital Profile, Smart Safety Tags, Card Design Studio, Ordering & Tracking, and instant Public Profile sharing—ready to download as a formatted PDF manual.'}
             </p>
             {userRecord && (
               <div className="pt-1">
@@ -171,8 +216,10 @@ export const UserGuidePage: React.FC = () => {
               <Download className="h-4 w-4" />
               <span>
                 {downloadingTarget === 'all'
-                  ? 'Building Complete PDF...'
-                  : 'Download Complete PDF Guide'}
+                  ? 'Building PDF Guide...'
+                  : isStaffViewer
+                    ? 'Download Complete PDF Guide'
+                    : 'Download User Guide (PDF)'}
               </span>
             </button>
             {activeRole !== 'all' && (
@@ -213,24 +260,26 @@ export const UserGuidePage: React.FC = () => {
         <section className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <h2 className="font-display text-lg font-bold text-[#0B1D3A]">
-              Role Access &amp; Capability Matrix
+              {isStaffViewer ? 'Role Access & Capability Matrix' : 'Your TapNex Features Overview'}
             </h2>
             <span className="text-xs text-slate-500">
-              Strict Firebase Auth &amp; Firestore Security Rule Enforcement
+              {isStaffViewer
+                ? 'Strict Firebase Auth & Firestore Security Rule Enforcement'
+                : 'Quick overview of Public Sharing & Customer Portal tools'}
             </span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
                 <tr>
-                  <th className="py-3 px-5 font-semibold whitespace-nowrap">User Role</th>
-                  <th className="py-3 px-5 font-semibold whitespace-nowrap">Authentication</th>
+                  <th className="py-3 px-5 font-semibold whitespace-nowrap">Section</th>
+                  <th className="py-3 px-5 font-semibold whitespace-nowrap">Access</th>
                   <th className="py-3 px-5 font-semibold whitespace-nowrap">Portal Entry</th>
-                  <th className="py-3 px-5 font-semibold">Core Features &amp; Responsibilities</th>
+                  <th className="py-3 px-5 font-semibold">Core Features &amp; Workflows</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {ROLE_CAPABILITY_MATRIX.map((row) => (
+                {visibleMatrixRows.map((row) => (
                   <tr key={row.role} className="hover:bg-slate-50/70">
                     <td className="py-3.5 px-5 font-semibold text-[#0B1D3A] whitespace-nowrap">
                       {row.role}
@@ -254,7 +303,7 @@ export const UserGuidePage: React.FC = () => {
         {/* Filter Bar: Segmented Role Tabs + Search */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-200/70 rounded-xl">
-            {ROLE_TABS.map((tab) => {
+            {visibleRoleTabs.map((tab) => {
               const selected = activeRole === tab.id;
               return (
                 <button

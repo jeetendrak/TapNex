@@ -678,7 +678,16 @@ export const CustomerCardStudioPage: React.FC = () => {
         : activeStudioProfileType === 'belongings'
           ? [
               { key: 'fullName', label: 'Owner / Item Label', previewValue: pi?.fullName || '', insertText: '{{FULL_NAME}}', defaultFontSizePt: 12, defaultBold: true },
-              { key: 'itemCategory', label: 'Item Category', previewValue: pi?.itemCategory || '', insertText: '{{ITEM_CATEGORY}}', defaultFontSizePt: 9 },
+              {
+                key: 'itemCategory',
+                label: 'Item Category',
+                previewValue:
+                  pi?.itemCategory === 'Other' && pi?.itemCategoryOther?.trim()
+                    ? pi.itemCategoryOther.trim()
+                    : pi?.itemCategory || '',
+                insertText: '{{ITEM_CATEGORY}}',
+                defaultFontSizePt: 9,
+              },
               { key: 'brandModel', label: 'Brand / Model', previewValue: pi?.brandModel || '', insertText: '{{BRAND_MODEL}}', defaultFontSizePt: 8.5, defaultBold: true },
               { key: 'serialNumber', label: 'Serial / Tag Reference', previewValue: pi?.serialNumber || '', insertText: '{{SERIAL_NUMBER}}', defaultFontSizePt: 8 },
               { key: 'mobile', label: 'Owner Mobile', previewValue: pi?.mobile || '', insertText: '{{MOBILE}}', defaultFontSizePt: 8.5 },

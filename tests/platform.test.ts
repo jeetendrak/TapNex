@@ -1080,6 +1080,38 @@ describe('Smart Safety Tags Shop, Multi-Profile Types, Auto-Slugs & Family Reuse
       }
     );
     expect(out).toBe('Neha Rao | Class 3B | B+ | Cat | Siamese | Laptop Bag | SN-7788 | Reward offered');
+
+    const otherOut = resolveCardTokens('{{ITEM_CATEGORY}}', {
+      itemCategory: 'Other',
+      itemCategoryOther: 'Camera Tripod',
+    });
+    expect(otherOut).toBe('Camera Tripod');
+
+    const otherBelongingProfile = makeSampleProfile({
+      profileType: 'belongings',
+      personalInformation: {
+        ...makeSampleProfile().personalInformation,
+        fullName: 'Field Gear',
+        itemCategory: 'Other',
+        itemCategoryOther: 'Camera Tripod',
+      },
+    });
+    const pubBelonging = buildSanitizedPublicProfile(otherBelongingProfile);
+    expect(pubBelonging.personalInformation?.itemCategory).toBe('Other');
+    expect(pubBelonging.personalInformation?.itemCategoryOther).toBe('Camera Tripod');
+  });
+
+  it('provides Netlify SPA fallback assets and scopes User Guide away from admin/superadmin for normal users', () => {
+    const redirectsSrc = fs.readFileSync(path.resolve(process.cwd(), 'public/_redirects'), 'utf8');
+    expect(redirectsSrc).toContain('/index.html');
+    const html404Src = fs.readFileSync(path.resolve(process.cwd(), 'public/404.html'), 'utf8');
+    expect(html404Src).toContain('tapnex_spa_redirect');
+    const appSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/App.tsx'), 'utf8');
+    expect(appSrc).toContain('/p/:slug/*');
+
+    const guidePageSrc = fs.readFileSync(path.resolve(process.cwd(), 'src/pages/public/UserGuidePage.tsx'), 'utf8');
+    expect(guidePageSrc).toContain('getAllowedGuideRolesForUser');
+    expect(guidePageSrc).toContain("return ['public', 'customer']");
   });
 });
 

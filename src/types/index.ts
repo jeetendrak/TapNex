@@ -157,6 +157,7 @@ export interface PersonalInformation {
   vetPhone?: string;
   // Personal Belongings Fields
   itemCategory?: string;
+  itemCategoryOther?: string;
   brandModel?: string;
   serialNumber?: string;
   finderNotes?: string;

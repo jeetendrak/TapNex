@@ -63,7 +63,11 @@ export function buildPublicVCard(profile: PublicProfileRecord, publicUrl: string
   if (info.allergiesOrMedical) extraNotes.push(`Medical/Allergies: ${info.allergiesOrMedical}`);
   if (info.petType || info.breed) extraNotes.push(`Pet: ${[info.petType, info.breed].filter(Boolean).join(' · ')}`);
   if (info.itemCategory || info.brandModel) {
-    extraNotes.push(`Item: ${[info.itemCategory, info.brandModel].filter(Boolean).join(' · ')}`);
+    const itemCatLabel =
+      info.itemCategory === 'Other' && info.itemCategoryOther?.trim()
+        ? info.itemCategoryOther.trim()
+        : info.itemCategory;
+    extraNotes.push(`Item: ${[itemCatLabel, info.brandModel].filter(Boolean).join(' · ')}`);
   }
   if (info.finderNotes) extraNotes.push(`Finder Notes: ${info.finderNotes}`);
   if (extraNotes.length > 0) {

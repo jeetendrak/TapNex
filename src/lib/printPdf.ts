@@ -64,7 +64,12 @@ export function resolveCardTokens(text: string, info: Partial<PersonalInformatio
     .replace(/\{\{OWNER_MOBILE\}\}/g, info.ownerMobile || info.mobile || 'Owner Number')
     .replace(/\{\{VET_NAME\}\}/g, info.vetName || 'Veterinarian')
     .replace(/\{\{VET_PHONE\}\}/g, info.vetPhone || 'Vet Phone')
-    .replace(/\{\{ITEM_CATEGORY\}\}/g, info.itemCategory || 'Belonging')
+    .replace(
+      /\{\{ITEM_CATEGORY\}\}/g,
+      info.itemCategory === 'Other' && info.itemCategoryOther?.trim()
+        ? info.itemCategoryOther.trim()
+        : info.itemCategory || 'Belonging'
+    )
     .replace(/\{\{BRAND_MODEL\}\}/g, info.brandModel || 'Brand / Model')
     .replace(/\{\{SERIAL_NUMBER\}\}/g, info.serialNumber || 'Serial / ID')
     .replace(/\{\{FINDER_NOTES\}\}/g, info.finderNotes || 'Please contact owner if found');

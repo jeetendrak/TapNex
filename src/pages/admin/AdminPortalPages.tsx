@@ -239,7 +239,14 @@ const AdminProfileInspectorModal: React.FC<{
         : pType === 'belongings'
           ? [
               { label: 'Item / Owner Label', value: info.fullName, visible: vis.fullName },
-              { label: 'Item Category', value: info.itemCategory, visible: Boolean(vis.itemDetails) },
+              {
+                label: 'Item Category',
+                value:
+                  info.itemCategory === 'Other' && info.itemCategoryOther?.trim()
+                    ? `Other (${info.itemCategoryOther.trim()})`
+                    : info.itemCategory,
+                visible: Boolean(vis.itemDetails),
+              },
               { label: 'Brand & Model', value: info.brandModel, visible: Boolean(vis.itemDetails) },
               { label: 'Serial / Tag Reference', value: info.serialNumber, visible: Boolean(vis.itemDetails) },
               { label: 'Owner Mobile', value: info.mobile, visible: vis.mobile },

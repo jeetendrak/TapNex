@@ -125,6 +125,7 @@ export default function App() {
 
             {/* Public Digital Business Profile (No Login Required) */}
             <Route path="/p/:slug" element={<PublicProfilePage />} />
+            <Route path="/p/:slug/*" element={<PublicProfilePage />} />
 
             {/* Authentication Routes */}
             <Route path="/login" element={<LoginPage />} />

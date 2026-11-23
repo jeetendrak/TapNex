@@ -246,7 +246,7 @@ export function calculateProfileCompletion(profile: ProfileRecord | null): numbe
     checks = [
       Boolean(info.photoDataUrl),
       Boolean(info.fullName),
-      Boolean(info.itemCategory),
+      Boolean(info.itemCategory && (info.itemCategory !== 'Other' || info.itemCategoryOther?.trim())),
       Boolean(info.ownerName),
       Boolean(info.ownerMobile),
       Boolean(info.finderNotes || info.brandModel),
@@ -381,6 +381,9 @@ export function buildSanitizedPublicProfile(
   if (profileType === 'belongings') {
     if (v.itemDetails ?? true) {
       if (info.itemCategory) publicInfo.itemCategory = info.itemCategory;
+      if (info.itemCategory === 'Other' && info.itemCategoryOther?.trim()) {
+        publicInfo.itemCategoryOther = info.itemCategoryOther.trim();
+      }
       if (info.brandModel) publicInfo.brandModel = info.brandModel;
       if (info.serialNumber) publicInfo.serialNumber = info.serialNumber;
     }

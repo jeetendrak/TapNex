@@ -257,6 +257,7 @@ export const EMPTY_PERSONAL_INFO: PersonalInformation = {
   vetName: '',
   vetPhone: '',
   itemCategory: 'Bag / Backpack',
+  itemCategoryOther: '',
   brandModel: '',
   serialNumber: '',
   finderNotes: '',

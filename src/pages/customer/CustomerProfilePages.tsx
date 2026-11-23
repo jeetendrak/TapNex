@@ -248,7 +248,14 @@ const WatermarkedProfileModal: React.FC<{
               )}
               {profileType === 'belongings' && (info.itemCategory || info.brandModel) && (
                 <p className="text-xs text-slate-600 mt-1">
-                  {[info.itemCategory, info.brandModel].filter(Boolean).join(' · ')}
+                  {[
+                    info.itemCategory === 'Other' && info.itemCategoryOther?.trim()
+                      ? info.itemCategoryOther.trim()
+                      : info.itemCategory,
+                    info.brandModel,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
                 </p>
               )}
               {v.shortBio && info.shortBio && (
@@ -1332,6 +1339,18 @@ export const CustomerProfilePage: React.FC = () => {
       );
       return;
     }
+    if (
+      (activeProfile.profileType || 'adult') === 'belongings' &&
+      activeProfile.personalInformation.itemCategory === 'Other' &&
+      !activeProfile.personalInformation.itemCategoryOther?.trim()
+    ) {
+      notify(
+        'Other item description required',
+        'Please describe what the Other item is before saving.',
+        'error'
+      );
+      return;
+    }
     const cleanSlug = sanitizeSlug(slugInput);
     if (cleanSlug.length < 3) {
       notify('Invalid slug', 'Public URL slug must be at least 3 characters.', 'error');
@@ -1965,7 +1984,21 @@ export const CustomerProfilePage: React.FC = () => {
                 <label className="block text-xs font-medium text-slate-600 mb-1">Item Category *</label>
                 <select
                   value={info.itemCategory || 'Bag / Backpack'}
-                  onChange={(e) => updateInfo('itemCategory', e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val !== 'Other' && activeProfile) {
+                      setActiveProfile({
+                        ...activeProfile,
+                        personalInformation: {
+                          ...activeProfile.personalInformation,
+                          itemCategory: val,
+                          itemCategoryOther: '',
+                        },
+                      });
+                    } else {
+                      updateInfo('itemCategory', val);
+                    }
+                  }}
                   className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm bg-white"
                 >
                   {BELONGING_CATEGORY_OPTIONS.map((cat) => (
@@ -1973,6 +2006,21 @@ export const CustomerProfilePage: React.FC = () => {
                   ))}
                 </select>
               </div>
+              {(info.itemCategory || '') === 'Other' && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    Describe Other Item *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={info.itemCategoryOther || ''}
+                    onChange={(e) => updateInfo('itemCategoryOther', e.target.value)}
+                    placeholder="e.g. Camera Tripod, Hearing Aid, Musical Instrument, Toolbox"
+                    className="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm"
+                  />
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Brand / Model / Color</label>
                 <input
@@ -3036,7 +3084,7 @@ export const CustomerVisibilityPage: React.FC = () => {
               { key: 'medicalInfo', label: 'Medical & Allergy Notes', hasValue: Boolean(info.allergiesOrMedical) },
             ]
           : [
-              { key: 'itemDetails', label: 'Item Category, Brand & Serial ID', hasValue: Boolean(info.itemCategory || info.brandModel || info.serialNumber) },
+              { key: 'itemDetails', label: 'Item Category, Brand & Serial ID', hasValue: Boolean((info.itemCategory && info.itemCategory !== 'Other') || info.itemCategoryOther?.trim() || info.brandModel || info.serialNumber) },
               { key: 'ownerContact', label: 'Owner Name & Mobile', hasValue: Boolean(info.ownerName || info.ownerMobile) },
               { key: 'finderNotes', label: 'Finder & Reward Instructions', hasValue: Boolean(info.finderNotes) },
             ];
