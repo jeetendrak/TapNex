@@ -77,6 +77,14 @@ import { getActiveStudioDraft, saveActiveStudioDraft } from '../../lib/studioDra
 import { compressImageFileToDataUrl } from '../../lib/qrArtwork';
 import { resolveCardTokens } from '../../lib/printPdf';
 import {
+  buildEffectiveProfileInfo,
+  detectFieldKeyFromText,
+  doesSideContainField,
+  getNextCleanCardTextSlot,
+  populateSideWithProfileInfo,
+  refreshUneditedSideWithProfileInfo,
+} from '../../lib/cardProfileSync';
+import {
   BLANK_CARD_TEMPLATE,
   DEFAULT_CARD_TEMPLATES,
   DEFAULT_PAYMENT_GATEWAYS,
@@ -134,16 +142,6 @@ function isLightHexColor(hex: string): boolean {
   if ([r, g, b].some((n) => Number.isNaN(n))) return false;
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
   return luminance > 0.62;
-}
-
-function getNextCleanTextPosition(elements: CardTextElement[]): { xPct: number; yPct: number } {
-  const candidates = [14, 24, 34, 44, 54, 64, 74, 82];
-  for (const y of candidates) {
-    const occupied = elements.some((el) => Math.abs(el.yPct - y) < 8);
-    if (!occupied) return { xPct: 8, yPct: y };
-  }
-  const offset = (elements.length % 5) * 6;
-  return { xPct: 10 + (elements.length % 3) * 4, yPct: Math.min(82, 22 + offset) };
 }
 
 interface ProfileCardFieldOption {
@@ -219,8 +217,10 @@ export const CustomerCardStudioPage: React.FC = () => {
     prof: ProfileRecord | null,
     activeList: CardTemplateRecord[],
     userDesigns: CardDesignRecord[],
-    uid: string
+    uid: string,
+    usr = userRecord
   ) => {
+    const effInfo = buildEffectiveProfileInfo(prof, usr);
     const localDraft = prof ? getActiveStudioDraft(uid, prof.profileId) : null;
     const matchingSaved =
       (prof && userDesigns.find((d) => d.profileId === prof.profileId)) || (!localDraft ? userDesigns[0] : undefined);
@@ -243,9 +243,10 @@ export const CustomerCardStudioPage: React.FC = () => {
         (localDraft.templateId === BLANK_CARD_TEMPLATE.templateId ? BLANK_CARD_TEMPLATE : defaultFallback);
       setSelectedTpl(matchedTpl);
       setOrientation(localDraft.cardOrientation || 'landscape');
-      const hydratedFront = cloneSide(localDraft.frontDesign);
+      const hydratedFront = refreshUneditedSideWithProfileInfo(localDraft.frontDesign, effInfo);
+      const hydratedBack = refreshUneditedSideWithProfileInfo(localDraft.backDesign, effInfo);
       setFrontDesign(hydratedFront);
-      setBackDesign(cloneSide(localDraft.backDesign));
+      setBackDesign(hydratedBack);
       setMode('custom');
       setSelectedTarget(hydratedFront.elements[0] ? { kind: 'text', id: hydratedFront.elements[0].id } : null);
     } else if (matchingSaved) {
@@ -254,21 +255,19 @@ export const CustomerCardStudioPage: React.FC = () => {
         (matchingSaved.templateId === BLANK_CARD_TEMPLATE.templateId ? BLANK_CARD_TEMPLATE : defaultFallback);
       setSelectedTpl(matchedTpl);
       setOrientation(matchingSaved.cardOrientation || 'landscape');
-      const hydratedFront = cloneSide(matchingSaved.frontDesign);
+      const hydratedFront = refreshUneditedSideWithProfileInfo(matchingSaved.frontDesign, effInfo);
+      const hydratedBack = refreshUneditedSideWithProfileInfo(matchingSaved.backDesign, effInfo);
       setFrontDesign(hydratedFront);
-      setBackDesign(cloneSide(matchingSaved.backDesign));
+      setBackDesign(hydratedBack);
       setMode('custom');
       setSelectedTarget(hydratedFront.elements[0] ? { kind: 'text', id: hydratedFront.elements[0].id } : null);
     } else {
       const firstTpl = defaultFallback;
       setSelectedTpl(firstTpl);
-      const initialFront = cloneSide(firstTpl.frontSpec);
-      if (prof?.personalInformation?.photoDataUrl) {
-        initialFront.avatarDataUrl = prof.personalInformation.photoDataUrl;
-        initialFront.avatarSizeMm = initialFront.avatarSizeMm || 15;
-      }
+      const initialFront = populateSideWithProfileInfo(firstTpl.frontSpec, effInfo);
+      const initialBack = populateSideWithProfileInfo(firstTpl.backSpec, effInfo);
       setFrontDesign(initialFront);
-      setBackDesign(cloneSide(firstTpl.backSpec));
+      setBackDesign(initialBack);
       setSelectedTarget(null);
     }
   };
@@ -286,7 +285,7 @@ export const CustomerCardStudioPage: React.FC = () => {
         setSelectedProfile(firstProf);
         setSavedDesigns(userDesigns);
 
-        hydrateDesignForProfile(firstProf, activeList, userDesigns, userRecord.uid);
+        hydrateDesignForProfile(firstProf, activeList, userDesigns, userRecord.uid, userRecord);
         setTimeout(() => {
           studioReadyRef.current = true;
         }, 0);
@@ -332,22 +331,21 @@ export const CustomerCardStudioPage: React.FC = () => {
     BLANK_CARD_TEMPLATE,
   ];
 
+  const effectiveProfileInfo = buildEffectiveProfileInfo(selectedProfile, userRecord);
+
   const applyTemplate = (tpl: CardTemplateRecord, enterCustomMode = false) => {
     setSelectedTpl(tpl);
-    const nextFront = cloneSide(tpl.frontSpec);
-    if (selectedProfile?.personalInformation?.photoDataUrl && !nextFront.avatarDataUrl) {
-      nextFront.avatarDataUrl = selectedProfile.personalInformation.photoDataUrl;
-      nextFront.avatarSizeMm = nextFront.avatarSizeMm || 15;
-    }
+    const nextFront = populateSideWithProfileInfo(tpl.frontSpec, effectiveProfileInfo);
+    const nextBack = populateSideWithProfileInfo(tpl.backSpec, effectiveProfileInfo);
     setFrontDesign(nextFront);
-    setBackDesign(cloneSide(tpl.backSpec));
+    setBackDesign(nextBack);
     if (!tpl.supportsVertical && orientation === 'vertical') {
       setOrientation('landscape');
     }
     if (enterCustomMode) {
       setMode('custom');
     }
-    const activeElements = activeSide === 'front' ? nextFront.elements : tpl.backSpec.elements;
+    const activeElements = activeSide === 'front' ? nextFront.elements : nextBack.elements;
     setSelectedTarget(
       (enterCustomMode || mode === 'custom') && activeElements[0]
         ? { kind: 'text', id: activeElements[0].id }
@@ -360,19 +358,16 @@ export const CustomerCardStudioPage: React.FC = () => {
     const defaultFallback = templates.find((t) => t.isDefault) || templates[0] || BLANK_CARD_TEMPLATE;
     const baseTpl =
       allDropdownTemplates.find((t) => t.templateId === selectedTpl.templateId) || defaultFallback;
-    const nextFront = cloneSide(baseTpl.frontSpec);
-    if (selectedProfile?.personalInformation?.photoDataUrl && !nextFront.avatarDataUrl) {
-      nextFront.avatarDataUrl = selectedProfile.personalInformation.photoDataUrl;
-      nextFront.avatarSizeMm = nextFront.avatarSizeMm || 15;
-    }
+    const nextFront = populateSideWithProfileInfo(baseTpl.frontSpec, effectiveProfileInfo);
+    const nextBack = populateSideWithProfileInfo(baseTpl.backSpec, effectiveProfileInfo);
     setFrontDesign(nextFront);
-    setBackDesign(cloneSide(baseTpl.backSpec));
+    setBackDesign(nextBack);
     setOrientation('landscape');
     setActiveSide('front');
     setSelectedTarget(null);
     setEditingTextId(null);
     setApprovalChecked(false);
-    notify('Default settings loaded', `Reset studio layout to ${baseTpl.name} defaults.`, 'info');
+    notify('Default settings loaded', `Reset studio layout to ${baseTpl.name} defaults with your profile details.`, 'info');
   };
 
   const currentSide = activeSide === 'front' ? frontDesign : backDesign;
@@ -546,8 +541,8 @@ export const CustomerCardStudioPage: React.FC = () => {
   };
 
   const handleStartBlankCard = () => {
-    const blankFront = cloneSide(BLANK_CARD_TEMPLATE.frontSpec);
-    const blankBack = cloneSide(BLANK_CARD_TEMPLATE.backSpec);
+    const blankFront = populateSideWithProfileInfo(BLANK_CARD_TEMPLATE.frontSpec, effectiveProfileInfo);
+    const blankBack = populateSideWithProfileInfo(BLANK_CARD_TEMPLATE.backSpec, effectiveProfileInfo);
     setSelectedTpl(BLANK_CARD_TEMPLATE);
     setFrontDesign(blankFront);
     setBackDesign(blankBack);
@@ -558,7 +553,7 @@ export const CustomerCardStudioPage: React.FC = () => {
     setEditingTextId(null);
     notify(
       'Blank card canvas ready',
-      'Upload separate Front & Back designs or add text, shapes, logos, photos, SMART & QR icons.',
+      'Upload separate Front & Back designs or toggle profile details below to place on your card.',
       'success'
     );
   };
@@ -601,12 +596,13 @@ export const CustomerCardStudioPage: React.FC = () => {
 
   const addTextElement = (initialText = 'Double-click to edit', startInlineEdit = true) => {
     const id = `txt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    const pos = getNextCleanTextPosition(currentSide.elements);
+    const slot = getNextCleanCardTextSlot(currentSide);
     const newEl: CardTextElement = {
       id,
       text: initialText,
-      xPct: pos.xPct,
-      yPct: pos.yPct,
+      xPct: slot.xPct,
+      yPct: slot.yPct,
+      maxWidthPct: slot.maxWidthPct,
       fontSizePt: 9,
       fontFamily: 'Plus Jakarta Sans',
       fontWeight: 'normal',
@@ -647,7 +643,7 @@ export const CustomerCardStudioPage: React.FC = () => {
   };
 
   // Build list of filled profile fields available for quick toggle into card layout (tailored by profileType)
-  const pi = selectedProfile?.personalInformation;
+  const pi = effectiveProfileInfo;
   const builtInFieldOptions: ProfileCardFieldOption[] =
     activeStudioProfileType === 'kids'
       ? [
@@ -735,16 +731,55 @@ export const CustomerCardStudioPage: React.FC = () => {
   const allProfileFieldOptions = [...builtInFieldOptions, ...customFieldOptions];
   const filledFieldOptions = allProfileFieldOptions.filter((opt) => Boolean(opt.previewValue.trim()));
 
-  const isFieldOnCurrentSide = (opt: ProfileCardFieldOption): boolean =>
-    currentSide.elements.some((el) => el.text.trim() === opt.insertText.trim());
+  const isFieldOnSide = (sideSpec: CardSideDesign, opt: ProfileCardFieldOption): boolean =>
+    doesSideContainField(sideSpec, opt);
 
-  const profileInsertTokenSet = new Set(allProfileFieldOptions.map((o) => o.insertText.trim()));
+  const isFieldOnCurrentSide = (opt: ProfileCardFieldOption): boolean =>
+    isFieldOnSide(currentSide, opt);
+
+  const elementMatchesOption = (el: CardTextElement, opt: ProfileCardFieldOption): boolean => {
+    if (el.fieldKey && el.fieldKey === opt.key) return true;
+    if (el.fieldKeys && el.fieldKeys.includes(opt.key)) return true;
+    const insert = opt.insertText.trim();
+    const text = (el.text || '').trim();
+    if (!text || !insert) return false;
+    if (text === insert) return true;
+    if (/^\{\{[A-Z0-9_]+\}\}$/.test(insert) && text.includes(insert)) return true;
+    return detectFieldKeyFromText(text) === opt.key;
+  };
+
   const activeProfileElementsOnSide = currentSide.elements.filter((el) =>
-    profileInsertTokenSet.has(el.text.trim())
+    allProfileFieldOptions.some((opt) => elementMatchesOption(el, opt))
   );
   const displayProfileDataChecked = activeProfileElementsOnSide.length > 0 || Boolean(currentSide.showAvatar);
 
   const activeFieldCount = allProfileFieldOptions.filter(isFieldOnCurrentSide).length;
+  const frontFieldCount = allProfileFieldOptions.filter((o) => isFieldOnSide(frontDesign, o)).length;
+  const backFieldCount = allProfileFieldOptions.filter((o) => isFieldOnSide(backDesign, o)).length;
+
+  const createFieldElementForSide = (sideSpec: CardSideDesign, opt: ProfileCardFieldOption, indexSuffix = 0): CardTextElement => {
+    const slot = getNextCleanCardTextSlot(sideSpec);
+    const materializedText = opt.previewValue.trim()
+      ? opt.key.startsWith('cf_')
+        ? opt.insertText
+        : opt.previewValue.trim()
+      : opt.insertText;
+    return {
+      id: `fld_${opt.key}_${Date.now().toString(36)}_${indexSuffix}`,
+      text: materializedText,
+      fieldKey: opt.key,
+      xPct: slot.xPct,
+      yPct: slot.yPct,
+      maxWidthPct: slot.maxWidthPct,
+      fontSizePt: opt.defaultFontSizePt,
+      fontFamily: 'Plus Jakarta Sans',
+      fontWeight: opt.defaultBold ? 'bold' : 'normal',
+      fontStyle: 'normal',
+      textDecoration: 'none',
+      color: getDefaultContrastColor(),
+      align: 'left',
+    };
+  };
 
   const toggleDisplayAllProfileData = (checked: boolean) => {
     if (!checked) {
@@ -752,10 +787,11 @@ export const CustomerCardStudioPage: React.FC = () => {
         elements: activeProfileElementsOnSide,
         showAvatar: Boolean(currentSide.showAvatar),
       };
+      const removeIds = new Set(activeProfileElementsOnSide.map((el) => el.id));
       setCurrentSide({
         ...currentSide,
         showAvatar: false,
-        elements: currentSide.elements.filter((el) => !profileInsertTokenSet.has(el.text.trim())),
+        elements: currentSide.elements.filter((el) => !removeIds.has(el.id)),
       });
       return;
     }
@@ -773,60 +809,36 @@ export const CustomerCardStudioPage: React.FC = () => {
       return;
     }
     const baseList = filledFieldOptions.length > 0 ? filledFieldOptions : builtInFieldOptions.slice(0, 5);
-    const toAdd: CardTextElement[] = [];
-    let running = [...currentSide.elements];
+    const runningSide: CardSideDesign = { ...currentSide, elements: [...currentSide.elements] };
+    let added = 0;
     for (const opt of baseList) {
-      if (running.some((el) => el.text.trim() === opt.insertText.trim())) continue;
-      const pos = getNextCleanTextPosition(running);
-      const item: CardTextElement = {
-        id: `fld_${opt.key}_${Date.now().toString(36)}_${toAdd.length}`,
-        text: opt.insertText,
-        xPct: pos.xPct,
-        yPct: pos.yPct,
-        fontSizePt: opt.defaultFontSizePt,
-        fontFamily: 'Plus Jakarta Sans',
-        fontWeight: opt.defaultBold ? 'bold' : 'normal',
-        fontStyle: 'normal',
-        textDecoration: 'none',
-        color: getDefaultContrastColor(),
-        align: 'left',
-      };
-      running.push(item);
-      toAdd.push(item);
+      if (isFieldOnSide(runningSide, opt)) continue;
+      const item = createFieldElementForSide(runningSide, opt, added++);
+      runningSide.elements.push(item);
     }
     setCurrentSide({
-      ...currentSide,
+      ...runningSide,
       showAvatar: Boolean(currentSide.showAvatar),
       avatarDataUrl: currentSide.avatarDataUrl || pi?.photoDataUrl,
       avatarShape: currentSide.avatarShape || 'square',
-      elements: running,
     });
   };
 
   const toggleProfileFieldOnCard = (opt: ProfileCardFieldOption) => {
-    const existing = currentSide.elements.find((el) => el.text.trim() === opt.insertText.trim());
-    if (existing) {
-      removeElementById(existing.id);
+    const matches = currentSide.elements.filter((el) => elementMatchesOption(el, opt));
+    if (matches.length > 0) {
+      const matchIds = new Set(matches.map((m) => m.id));
+      setCurrentSide({
+        ...currentSide,
+        elements: currentSide.elements.filter((el) => !matchIds.has(el.id)),
+      });
+      if (selectedElementId && matchIds.has(selectedElementId)) setSelectedTarget(null);
+      if (editingTextId && matchIds.has(editingTextId)) setEditingTextId(null);
       return;
     }
-    const id = `fld_${opt.key}_${Date.now().toString(36)}`;
-    const pos = getNextCleanTextPosition(currentSide.elements);
-    const newEl: CardTextElement = {
-      id,
-      text: opt.insertText,
-      xPct: pos.xPct,
-      yPct: pos.yPct,
-      fontSizePt: opt.defaultFontSizePt,
-      fontFamily: 'Plus Jakarta Sans',
-      fontWeight: opt.defaultBold ? 'bold' : 'normal',
-      fontStyle: 'normal',
-      textDecoration: 'none',
-      color: getDefaultContrastColor(),
-      align: 'left',
-    };
+    const newEl = createFieldElementForSide(currentSide, opt);
     setCurrentSide({ ...currentSide, elements: [...currentSide.elements, newEl] });
-    setSelectedTarget({ kind: 'text', id });
-    setMode('custom');
+    setSelectedTarget({ kind: 'text', id: newEl.id });
   };
 
   const handleBackgroundUploadForSide = async (
@@ -1017,7 +1029,7 @@ export const CustomerCardStudioPage: React.FC = () => {
               />
             </label>
 
-            {/* Profile Info Dropdown (Checkbox selector for saved profile data) */}
+            {/* Card Fields Quick Dropdown (Checkbox selector for saved profile data) */}
             <div className="relative" ref={fieldsDropdownRef}>
               <button
                 type="button"
@@ -1025,7 +1037,7 @@ export const CustomerCardStudioPage: React.FC = () => {
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 text-xs font-semibold min-h-[38px]"
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>Profile Data on {activeSide === 'front' ? 'Front' : 'Back'}</span>
+                <span>Card Fields ({activeSide === 'front' ? 'Front' : 'Back'})</span>
                 <span className="px-1.5 py-0.5 rounded bg-indigo-600 text-white text-[10px] font-bold tabular-nums">
                   {activeFieldCount}
                 </span>
@@ -1186,7 +1198,7 @@ export const CustomerCardStudioPage: React.FC = () => {
                   if (userRecord && nextProf) {
                     localStorage.setItem(`tapnex_active_profile_${userRecord.uid}`, nextProf.profileId);
                     studioReadyRef.current = false;
-                    hydrateDesignForProfile(nextProf, templates, savedDesigns, userRecord.uid);
+                    hydrateDesignForProfile(nextProf, templates, savedDesigns, userRecord.uid, userRecord);
                     setTimeout(() => {
                       studioReadyRef.current = true;
                     }, 0);
@@ -1287,7 +1299,7 @@ export const CustomerCardStudioPage: React.FC = () => {
               <CardCanvasPreview
                 side={currentSide}
                 orientation={orientation}
-                personalInfo={selectedProfile?.personalInformation || {}}
+                personalInfo={effectiveProfileInfo}
                 showPrintGuides
                 interactive
                 editResolvedText
@@ -1696,10 +1708,185 @@ export const CustomerCardStudioPage: React.FC = () => {
               <div className="rounded-xl bg-blue-50/70 border border-blue-200 p-3.5 text-xs text-slate-700 flex items-start gap-2.5">
                 <QrCode className="h-4 w-4 text-[#1D4ED8] shrink-0 mt-0.5" />
                 <span>
-                  Choose any template from the <strong>Template</strong> dropdown, upload separate <strong>Front</strong> &amp; <strong>Back</strong> designs, check <strong>Profile Data</strong> fields, and click or drag any element on the card to edit.
+                  Templates open pre-filled with your editable profile details. Check or uncheck fields under{' '}
+                  <strong>Information to Display on Card</strong> below, or click any element on the card to move and edit it.
                 </span>
               </div>
             )}
+
+            {/* Always-Visible Information to Display on Card Panel (Available in Template & Customize Modes) */}
+            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-200">
+                <div>
+                  <h3 className="font-display font-bold text-sm text-[#0B1D3A]">
+                    Information to Display on Card
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Choose which saved details appear on the{' '}
+                    <strong className="text-[#0B1D3A]">{activeSide === 'front' ? 'Front Side' : 'Back Side'}</strong>{' '}
+                    of your card ({selectedProfile?.profileLabel || 'Primary Profile'} ·{' '}
+                    <Link to="/dashboard/profile" className="text-[#1D4ED8] hover:underline font-medium">
+                      Edit Profile Info
+                    </Link>
+                    )
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="flex items-center gap-0.5 p-0.5 bg-white border border-slate-200 rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => setActiveSide('front')}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+                        activeSide === 'front' ? 'bg-[#0B1D3A] text-white' : 'text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      Front ({frontFieldCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveSide('back')}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+                        activeSide === 'back' ? 'bg-[#0B1D3A] text-white' : 'text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      Back ({backFieldCount})
+                    </button>
+                  </div>
+
+                  <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-indigo-200 bg-indigo-50 text-[11px] font-semibold text-indigo-800 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={displayProfileDataChecked}
+                      onChange={(e) => toggleDisplayAllProfileData(e.target.checked)}
+                      className="h-3.5 w-3.5 accent-[#1D4ED8]"
+                    />
+                    <span>Show Filled Details</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Quick Toggle Strip: Photo / QR Slot / SMART Wave */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <label
+                  className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-xs cursor-pointer transition-colors ${
+                    currentSide.showAvatar
+                      ? 'bg-white border-blue-300 text-[#0B1D3A] font-semibold'
+                      : 'bg-white/60 border-slate-200 text-slate-600 hover:bg-white'
+                  }`}
+                >
+                  <span className="flex items-center gap-2 min-w-0">
+                    {pi?.photoDataUrl ? (
+                      <img
+                        src={pi.photoDataUrl}
+                        alt=""
+                        className="w-5 h-5 rounded-full object-cover shrink-0 border border-slate-300"
+                      />
+                    ) : (
+                      <UserCircle2 className="w-4 h-4 text-slate-400 shrink-0" />
+                    )}
+                    <span className="truncate">Profile Photo</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(currentSide.showAvatar)}
+                    onChange={(e) =>
+                      setCurrentSide({
+                        ...currentSide,
+                        avatarDataUrl: currentSide.avatarDataUrl || pi?.photoDataUrl || '',
+                        avatarShape: currentSide.avatarShape || 'square',
+                        showAvatar: e.target.checked,
+                      })
+                    }
+                    className="h-4 w-4 accent-[#1D4ED8] shrink-0"
+                  />
+                </label>
+
+                <label
+                  className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-xs cursor-pointer transition-colors ${
+                    currentSide.showQrSlot
+                      ? 'bg-white border-blue-300 text-[#0B1D3A] font-semibold'
+                      : 'bg-white/60 border-slate-200 text-slate-600 hover:bg-white'
+                  }`}
+                >
+                  <span className="flex items-center gap-2 min-w-0">
+                    <QrCode className="w-4 h-4 text-[#1D4ED8] shrink-0" />
+                    <span className="truncate">QR Code Slot</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(currentSide.showQrSlot)}
+                    onChange={(e) => setCurrentSide({ ...currentSide, showQrSlot: e.target.checked })}
+                    className="h-4 w-4 accent-[#1D4ED8] shrink-0"
+                  />
+                </label>
+
+                <label
+                  className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-xs cursor-pointer transition-colors ${
+                    currentSide.showNfcIcon
+                      ? 'bg-white border-blue-300 text-[#0B1D3A] font-semibold'
+                      : 'bg-white/60 border-slate-200 text-slate-600 hover:bg-white'
+                  }`}
+                >
+                  <span className="flex items-center gap-2 min-w-0">
+                    <Wifi className="w-4 h-4 text-[#1D4ED8] rotate-90 shrink-0" />
+                    <span className="truncate">SMART Wave Icon</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(currentSide.showNfcIcon)}
+                    onChange={(e) => setCurrentSide({ ...currentSide, showNfcIcon: e.target.checked })}
+                    className="h-4 w-4 accent-[#1D4ED8] shrink-0"
+                  />
+                </label>
+              </div>
+
+              {/* Selectable Profile Fields Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-60 overflow-y-auto pr-1">
+                {allProfileFieldOptions.map((opt) => {
+                  const checkedOnCurrent = isFieldOnCurrentSide(opt);
+                  const oppositeSide = activeSide === 'front' ? 'back' : 'front';
+                  const checkedOnOpposite = isFieldOnSide(
+                    oppositeSide === 'front' ? frontDesign : backDesign,
+                    opt
+                  );
+                  return (
+                    <label
+                      key={opt.key}
+                      className={`flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border text-left cursor-pointer transition-colors ${
+                        checkedOnCurrent
+                          ? 'bg-white border-[#1D4ED8]/50 ring-1 ring-[#1D4ED8]/20 text-[#0B1D3A]'
+                          : 'bg-white/70 border-slate-200 text-slate-700 hover:bg-white'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-semibold truncate">{opt.label}</span>
+                          {checkedOnOpposite && !checkedOnCurrent && (
+                            <span className="text-[10px] font-medium text-slate-500">
+                              · on {oppositeSide}
+                            </span>
+                          )}
+                        </div>
+                        <div
+                          className={`text-[11px] truncate ${
+                            opt.previewValue ? 'text-slate-600' : 'text-slate-400 italic'
+                          }`}
+                        >
+                          {opt.previewValue || 'Empty in My Profile (editable on card)'}
+                        </div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={checkedOnCurrent}
+                        onChange={() => toggleProfileFieldOnCard(opt)}
+                        className="h-4 w-4 accent-[#1D4ED8] shrink-0"
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
           {/* Right Panel: Template Picker or Tabbed Visual Editor */}
@@ -2971,8 +3158,8 @@ export const CustomerCardStudioPage: React.FC = () => {
                       const matchedTpl = templates.find((t) => t.templateId === found.templateId) || templates[0];
                       if (matchedTpl) setSelectedTpl(matchedTpl);
                       setOrientation(found.cardOrientation || 'landscape');
-                      setFrontDesign(cloneSide(found.frontDesign));
-                      setBackDesign(cloneSide(found.backDesign));
+                      setFrontDesign(refreshUneditedSideWithProfileInfo(found.frontDesign, effectiveProfileInfo));
+                      setBackDesign(refreshUneditedSideWithProfileInfo(found.backDesign, effectiveProfileInfo));
                       setMode('custom');
                       notify('Loaded saved design', `Restored ${found.approved ? 'approved' : 'draft'} layout.`, 'info');
                     }}
@@ -3000,7 +3187,7 @@ export const CustomerCardStudioPage: React.FC = () => {
         frontDesign={frontDesign}
         backDesign={backDesign}
         orientation={orientation}
-        personalInfo={selectedProfile?.personalInformation || {}}
+        personalInfo={effectiveProfileInfo}
       />
 
       <ProfilePhotoEditorModal
@@ -3611,7 +3798,7 @@ export const CustomerCheckoutPage: React.FC = () => {
             <CardCanvasPreview
               side={previewSide === 'front' ? design.frontDesign : design.backDesign}
               orientation={design.cardOrientation}
-              personalInfo={profile.personalInformation}
+              personalInfo={buildEffectiveProfileInfo(profile, userRecord)}
             />
             <div className="flex items-center justify-between pt-3 border-t border-slate-100">
               <span className="text-sm text-slate-600">Quantity</span>
@@ -3722,7 +3909,7 @@ export const CustomerCheckoutPage: React.FC = () => {
         frontDesign={design.frontDesign}
         backDesign={design.backDesign}
         orientation={design.cardOrientation}
-        personalInfo={profile.personalInformation}
+        personalInfo={buildEffectiveProfileInfo(profile, userRecord)}
       />
     </PortalLayout>
   );

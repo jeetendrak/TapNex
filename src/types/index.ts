@@ -245,6 +245,8 @@ export interface PublicProfileRecord {
 export interface CardTextElement {
   id: string;
   text: string;
+  fieldKey?: string; // Tracks linked My Profile field key even when text is pre-filled or customized
+  fieldKeys?: string[]; // Tracks multiple linked field keys when a template line combines tokens
   xPct: number; // 0..100 inside trim box
   yPct: number; // 0..100 inside trim box
   maxWidthPct?: number; // 15..95 wrapping width %

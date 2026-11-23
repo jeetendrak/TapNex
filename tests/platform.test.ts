@@ -43,6 +43,13 @@ import {
   wrapCanvasTextLines,
 } from '../src/lib/cardLayout';
 import {
+  buildEffectiveProfileInfo,
+  doesSideContainField,
+  getNextCleanCardTextSlot,
+  populateSideWithProfileInfo,
+  refreshUneditedSideWithProfileInfo,
+} from '../src/lib/cardProfileSync';
+import {
   normalizeHexColor,
   sanitizeRichBioHtml,
   stripHtmlToPlainText,
@@ -1113,8 +1120,105 @@ describe('Smart Safety Tags Shop, Multi-Profile Types, Auto-Slugs & Family Reuse
     expect(guidePageSrc).toContain('getAllowedGuideRolesForUser');
     expect(guidePageSrc).toContain("return ['public', 'customer']");
   });
+
+  it('populates default card templates with editable profile values, tracks fieldKey across edits, and spaces toggled fields cleanly', () => {
+    const profile = makeSampleProfile();
+    const effInfo = buildEffectiveProfileInfo(profile, {
+      displayName: 'Account Fallback Name',
+      email: 'account@tapnex.in',
+      phone: '+91 90000 11111',
+    });
+    expect(effInfo.fullName).toBe('Aarav Mehta');
+
+    const freshEffInfo = buildEffectiveProfileInfo(
+      {
+        profileType: 'adult',
+        personalInformation: { ...profile.personalInformation, fullName: '', email: '', mobile: '' },
+      },
+      {
+        displayName: 'Priya Nair',
+        email: 'priya@eisora.in',
+        phone: '+91 98111 22334',
+      }
+    );
+    expect(freshEffInfo.fullName).toBe('Priya Nair');
+    expect(freshEffInfo.email).toBe('priya@eisora.in');
+    expect(freshEffInfo.mobile).toBe('+91 98111 22334');
+
+    const defaultTpl = DEFAULT_CARD_TEMPLATES.find((t) => t.isDefault) || DEFAULT_CARD_TEMPLATES[0];
+    const filledFront = populateSideWithProfileInfo(defaultTpl.frontSpec, effInfo);
+    const filledBack = populateSideWithProfileInfo(defaultTpl.backSpec, effInfo);
+
+    // Every filled token on default template becomes directly editable real text with fieldKey attached
+    const nameEl = filledFront.elements.find((e) => e.fieldKey === 'fullName');
+    expect(nameEl).toBeDefined();
+    expect(nameEl!.text).toBe('Aarav Mehta');
+
+    const mobileEl = filledBack.elements.find((e) => e.fieldKey === 'mobile');
+    expect(mobileEl).toBeDefined();
+    expect(mobileEl!.text).toBe('+91 98201 44510');
+
+    // Checkbox remains checked even after custom editing the materialized text
+    const customizedBack = {
+      ...filledBack,
+      elements: filledBack.elements.map((e) =>
+        e.id === mobileEl!.id ? { ...e, text: '+91 98201 44510 (Work)' } : e
+      ),
+    };
+    expect(
+      doesSideContainField(customizedBack, { key: 'mobile', insertText: '{{MOBILE}}' })
+    ).toBe(true);
+
+    // Multi-token kids template strings stay tracked for individual fields across front & back
+    const kidsTpl = DEFAULT_CARD_TEMPLATES.find((t) => t.profileType === 'kids')!;
+    const filledKidsFront = populateSideWithProfileInfo(kidsTpl.frontSpec, {
+      fullName: 'Riya Rao',
+      parentName: 'Neha Rao',
+      parentMobile: '+91 98201 00001',
+    });
+    expect(filledKidsFront.elements.some((e) => e.text.includes('Neha Rao'))).toBe(true);
+    expect(
+      doesSideContainField(filledKidsFront, { key: 'parentName', insertText: '{{PARENT_NAME}}' })
+    ).toBe(true);
+
+    const filledKidsBack = populateSideWithProfileInfo(kidsTpl.backSpec, {
+      emergencyContactName: 'Neha Rao',
+      emergencyContactPhone: '+91 98201 00001',
+    });
+    expect(
+      doesSideContainField(filledKidsBack, {
+        key: 'emergencyContactName',
+        insertText: '{{EMERGENCY_NAME}}',
+      })
+    ).toBe(true);
+    expect(
+      doesSideContainField(filledKidsBack, {
+        key: 'emergencyContactPhone',
+        insertText: '{{EMERGENCY_PHONE}}',
+      })
+    ).toBe(true);
+
+    // Older drafts with unresolved tokens pick up newly filled profile data without altering custom edits
+    const legacyDraft = {
+      ...defaultTpl.backSpec,
+      elements: defaultTpl.backSpec.elements.map((el) =>
+        el.text === '{{EMAIL}}' ? { ...el, text: 'custom-unchanged@tapnex.in' } : el
+      ),
+    };
+    const refreshed = refreshUneditedSideWithProfileInfo(legacyDraft, effInfo);
+    expect(refreshed.elements.some((el) => el.text === 'custom-unchanged@tapnex.in')).toBe(true);
+    expect(refreshed.elements.some((el) => el.text === '+91 98201 44510')).toBe(true);
+
+    // Clean slot allocator stays away from occupied y rows and right-hand QR area
+    const nextSlot = getNextCleanCardTextSlot(filledBack);
+    expect(nextSlot.maxWidthPct).toBeLessThanOrEqual(82);
+    expect(nextSlot.xPct).toBeLessThan(filledBack.qrSlotX);
+
+    const studioSrc = fs.readFileSync(
+      path.resolve(process.cwd(), 'src/pages/customer/CustomerStudioCheckoutPages.tsx'),
+      'utf8'
+    );
+    expect(studioSrc).toContain('Information to Display on Card');
+    expect(studioSrc).toContain('doesSideContainField');
+  });
 });
-
-
-
-
